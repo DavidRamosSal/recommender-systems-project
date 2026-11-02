@@ -1,0 +1,22 @@
+[project]
+name = "recommender-systems-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pandas>=3.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "notebook>=7.6.4",
+]
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+include = ["recsys*"]
