@@ -1,56 +1,50 @@
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
-
-from recsys.models import Recommender
 
 
 def evaluate(
-    model: Recommender,
-    test_ratings: pd.DataFrame,
-    train_ratings: pd.DataFrame,
-    catalogue: NDArray[np.int64],
+    labels: pd.DataFrame,
+    predictions: pd.DataFrame,
+    *,
+    catalogue_size: int,
 ) -> dict[str, float]:
-    """Evaluate top-10 rankings over the catalogue, excluding training items.
+    """Return Precision@10, Recall@10, binary NDCG@10 and catalogue coverage.
 
-    Every row in `test_ratings` counts as an expected recommendation; rating
-    values are ignored. `train_ratings` contains interactions to exclude.
-    Both need user_id and item_id columns and must be disjoint subsets of the
-    original MovieLens ratings. `catalogue` contains every movie ID once.
-    These inputs have unique user-item pairs and at least 10 unseen items per
-    user, so no deduplication or short-list handling is needed.
+    labels: DataFrame with int64 columns user_id, item_id; expected matches.
+    predictions: DataFrame with int64 columns user_id, item_id, rank;
+        rank 1 is best. Items must be unique per user, with ranks 1, 2, ...
+    catalogue_size: Total number of available items, used only for coverage.
 
-    Precision, recall and binary NDCG are averaged equally over users present
-    in `test_ratings`. Users absent from that table are excluded. Ties favor
-    smaller item IDs. Coverage is distinct recommended items / catalogue size.
+    Ranking metrics are averaged over users in labels. Missing predictions
+    count as misses. Select positive labels and exclude seen items beforehand.
     """
-    if test_ratings.empty or catalogue.size == 0:
-        raise ValueError("Evaluation needs test ratings and a catalogue.")
+    if labels.empty or catalogue_size <= 0:
+        raise ValueError("Evaluation needs labels and a positive catalogue size.")
 
-    history = train_ratings.groupby("user_id")["item_id"].agg(list).to_dict()
+    rankings = (
+        predictions[predictions["rank"] <= 10]
+        .sort_values("rank")
+        .groupby("user_id")["item_id"]
+        .agg(list)
+    )
     discounts = 1 / np.log2(np.arange(2, 12))
     per_user = []
-    recommended = set()
 
-    for user_id, ratings in test_ratings.groupby("user_id"):
-        expected = ratings["item_id"].to_numpy()
-        candidates = catalogue[~np.isin(catalogue, history.get(user_id, []))]
-
-        scores = np.asarray(model.score(int(user_id), candidates), dtype=float)
-        if scores.shape != candidates.shape or not np.isfinite(scores).all():
-            raise ValueError("score() must return one finite score per candidate.")
-
-        top = candidates[np.lexsort((candidates, -scores))[:10]]
+    for user_id, rows in labels.groupby("user_id"):
+        expected = rows["item_id"].unique()
+        top = rankings.get(user_id, [])
         hits = np.isin(top, expected)
-        dcg = np.sum(hits * discounts)
+        dcg = np.sum(hits * discounts[:len(top)])
         ideal_dcg = discounts[:min(10, len(expected))].sum()
         per_user.append((hits.sum() / 10, hits.sum() / len(expected), dcg / ideal_dcg))
-        recommended.update(top.tolist())
 
     precision, recall, ndcg = np.mean(per_user, axis=0)
     return {
         "precision@10": float(precision),
         "recall@10": float(recall),
         "ndcg@10": float(ndcg),
-        "catalogue_coverage": len(recommended) / len(catalogue),
+        "catalogue_coverage": float(
+            predictions.loc[predictions["rank"] <= 10, "item_id"].nunique()
+            / catalogue_size
+        ),
     }
