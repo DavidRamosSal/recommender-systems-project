@@ -9,10 +9,10 @@ URL = "https://files.grouplens.org/datasets/movielens/ml-1m.zip"
 
 
 def download_data(data_dir: str | Path = "data") -> Path:
-    """Download and extract unless the dataset folder already exists."""
+    """Download and extract unless all three required data files already exist."""
     data_dir = Path(data_dir)
     destination = data_dir / "ml-1m"
-    if destination.is_dir():
+    if all((destination / name).is_file() for name in ("ratings.dat", "movies.dat", "users.dat")):
         return destination
 
     data_dir.mkdir(parents=True, exist_ok=True)

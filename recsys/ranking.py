@@ -6,6 +6,18 @@ import pandas as pd
 from .models import Recommender
 
 
+def top_k_items(scores, seen, k: int = 10):
+    """Rank dense score rows, excluding seen items; ties follow column order.
+
+    Columns should follow sorted catalogue IDs. Unlike the notebook helper,
+    an exhausted candidate set is rejected instead of returning seen items.
+    """
+    if k < 1 or np.any((seen == 0).sum(axis=1) < k):
+        raise ValueError("Each user needs at least k unseen candidate items.")
+    masked = np.where(seen > 0, -np.inf, scores)
+    return np.argsort(-masked, axis=1, kind="stable")[:, :k]
+
+
 def top_k(
     model: Recommender,
     user_ids,

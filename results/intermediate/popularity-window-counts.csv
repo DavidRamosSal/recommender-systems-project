@@ -1,0 +1,7 @@
+split,days,ratings,positive_ratings
+validation,30,107762,62342
+validation,90,442496,254358
+validation,180,744253,427770
+test,30,4981,2647
+test,90,15032,8014
+test,180,46688,25690

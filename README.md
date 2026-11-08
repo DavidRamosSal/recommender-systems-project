@@ -4,31 +4,21 @@ Requires uv and Python 3.12. If uv is not installed, follow the
 [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/).
 Run commands from the repository root.
 
-Install the locked dependencies and download MovieLens 1M:
+Reproduce every number, table and generated figure in the current Part 1 report:
 
 ```bash
-uv sync --locked
-uv run --locked scripts/download_data.py
+uv run --locked scripts/run_all.py --data-dir data/ml-1m
 ```
 
-The dataset is extracted into `data/ml-1m/`.
+This installs the dependencies pinned in `uv.lock`, downloads MovieLens 1M if the
+default dataset is missing, and generates the data analysis, 60-setting validation
+search, all nine baseline results, and figures.
 
-Launch the analysis notebook in Jupyter Notebook:
+Final results are saved to `results/results.csv`, figures to `results/images/`,
+and supporting report tables to `results/intermediate/`.
 
-```bash
-uv run --locked jupyter notebook notebooks/part-1-analysis.ipynb
-```
+For an existing dataset, pass `--data-dir /path/to/ml-1m`, pointing to the folder
+containing `ratings.dat`, `movies.dat` and `users.dat`. Use `--out-dir /path/to/results`
+to change the output directory.
 
-`uv sync --locked` also installs `recsys` in editable mode, so imports work
-from notebooks and source changes are available without reinstalling. Select
-the project's `.venv` as your notebook kernel, and restart the kernel after
-the first installation.
-
-To use a different data location:
-
-```bash
-uv run --locked scripts/download_data.py --data-dir /path/to/datasets
-```
-
-The dataset will be at `/path/to/datasets/ml-1m/`; pass that directory to
-`load_movielens()` when loading it.
+The [project report](report/Recommender_Systems_Report.pdf) ([Word version](report/Recommender_Systems_Report.docx)) and [results spreadsheet](results/Recommender_Systems_Results.xlsm) are included in this repository.
