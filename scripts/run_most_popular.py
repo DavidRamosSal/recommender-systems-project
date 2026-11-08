@@ -2,13 +2,21 @@
 
     uv run --locked scripts/run_most_popular.py --data-dir data/ml-1m
 
-TODO: replace provisional_split() with the team's split once it is in
-recsys/ (David). Everything else stays the same.
+Protocol (same as the item-kNN baseline, see notebooks/part-1-analysis_split_knn.ipynb):
+* split by date: train < 2001-01-01 <= validation < 2001-07-01 <= test
+* relevant = rating >= 4; evaluated users have training history and at least
+  one relevant item in the evaluation window
+* candidates = all 3,706 rated movies minus the user's already rated ones
+* validation: fit on train; test: refit on train + validation
+
+Most-popular is deterministic, so there is no seed for the model. The seed
+below is only used for the bootstrap confidence intervals.
 """
 
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from recsys.data import load_movielens
@@ -16,27 +24,57 @@ from recsys.evaluation import evaluate
 from recsys.models.most_popular import MostPopular
 from recsys.ranking import top_k
 
+VAL_START = "2001-01-01"
+TEST_START = "2001-07-01"
 POSITIVE_THRESHOLD = 4
 RECENT_WINDOWS_DAYS = (30, 90, 180)
+BOOTSTRAP_SEED = 42
+BOOTSTRAP_SAMPLES = 1000
 
 
-def provisional_split(ratings: pd.DataFrame):
-    """Global temporal 80/10/10 cut on timestamp. Placeholder only."""
-    t_val, t_test = ratings["timestamp"].quantile([0.8, 0.9])
-    train = ratings[ratings["timestamp"] <= t_val]
-    val = ratings[(ratings["timestamp"] > t_val) & (ratings["timestamp"] <= t_test)]
-    test = ratings[ratings["timestamp"] > t_test]
+def to_epoch(date: str) -> int:
+    return int(pd.Timestamp(date, tz="UTC").timestamp())
+
+
+def split_by_date(ratings: pd.DataFrame):
+    val_start, test_start = to_epoch(VAL_START), to_epoch(TEST_START)
+    t = ratings["timestamp"]
+    train = ratings[t < val_start]
+    val = ratings[(t >= val_start) & (t < test_start)]
+    test = ratings[t >= test_start]
     return train, val, test
 
 
-def run(model: MostPopular, fit_on: pd.DataFrame, target: pd.DataFrame,
-        catalogue: pd.Index) -> dict[str, float]:
-    model.fit(fit_on)
-    labels = target[target["rating"] >= POSITIVE_THRESHOLD]
-    labels = labels[labels["user_id"].isin(fit_on["user_id"])][["user_id", "item_id"]]
-    predictions = top_k(model, labels["user_id"].unique(), catalogue, fit_on, k=10)
-    return {"users": labels["user_id"].nunique(),
-            **evaluate(labels, predictions, catalogue_size=len(catalogue))}
+def per_user_ndcg(labels: pd.DataFrame, predictions: pd.DataFrame) -> np.ndarray:
+    """NDCG@10 per user, same definition as recsys.evaluation.evaluate."""
+    discounts = 1 / np.log2(np.arange(2, 12))
+    ranked = predictions.sort_values("rank").groupby("user_id")["item_id"].agg(list)
+    values = []
+    for user_id, rows in labels.groupby("user_id"):
+        expected = rows["item_id"].unique()
+        top = ranked.get(user_id, [])[:10]
+        hits = np.isin(top, expected)
+        values.append((hits * discounts[:len(top)]).sum()
+                      / discounts[:min(10, len(expected))].sum())
+    return np.array(values)
+
+
+def bootstrap_ci(values: np.ndarray, rng: np.random.Generator) -> tuple[float, float]:
+    """95 % percentile bootstrap CI of the mean, resampling users."""
+    idx = rng.integers(0, len(values), size=(BOOTSTRAP_SAMPLES, len(values)))
+    means = values[idx].mean(axis=1)
+    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def run(model, history, window, catalogue, rng):
+    model.fit(history)
+    labels = window[window["rating"] >= POSITIVE_THRESHOLD]
+    labels = labels[labels["user_id"].isin(history["user_id"])][["user_id", "item_id"]]
+    predictions = top_k(model, labels["user_id"].unique(), catalogue, history, k=10)
+    metrics = evaluate(labels, predictions, catalogue_size=len(catalogue))
+    low, high = bootstrap_ci(per_user_ndcg(labels, predictions), rng)
+    return {"users": labels["user_id"].nunique(), **metrics,
+            "ndcg@10_ci_low": low, "ndcg@10_ci_high": high}
 
 
 def main() -> None:
@@ -46,26 +84,26 @@ def main() -> None:
     args = parser.parse_args()
 
     ratings = load_movielens(args.data_dir).ratings
-    train, val, test = provisional_split(ratings)
-    train_val = pd.concat([train, val])
+    train, val, test = split_by_date(ratings)
+    history_for_test = pd.concat([train, val])
+    catalogue = np.sort(ratings["item_id"].unique())   # 3,706 rated movies
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
 
     models = [MostPopular("all", "all"), MostPopular("all", "positive")]
-    models += [MostPopular("recent", fb, days)
-               for days in RECENT_WINDOWS_DAYS for fb in ("all", "positive")]
+    models += [MostPopular("recent", feedback, days)
+               for days in RECENT_WINDOWS_DAYS for feedback in ("all", "positive")]
 
     rows = []
     for model in models:
-        # Validation: fit on train. Test: refit on train+validation, so the
-        # popularity counts (and the recent window) end right before the test.
         rows.append({"model": model.name, "split": "validation",
-                     **run(model, train, val, pd.Index(train["item_id"].unique()))})
+                     **run(model, train, val, catalogue, rng)})
         rows.append({"model": model.name, "split": "test",
-                     **run(model, train_val, test, pd.Index(train_val["item_id"].unique()))})
+                     **run(model, history_for_test, test, catalogue, rng)})
 
     results = pd.DataFrame(rows)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(args.out, index=False)
-    with pd.option_context("display.width", 200, "display.precision", 4):
+    with pd.option_context("display.width", 220, "display.precision", 4):
         print(results.to_string(index=False))
 
 
