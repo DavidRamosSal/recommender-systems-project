@@ -5,6 +5,9 @@ from operator import index
 import numpy as np
 
 
+VALIDATION_ORDERS = (1, 2, 3)
+
+
 class MarkovChain:
     """Predict the next liked movie from a fixed number of recent likes."""
 

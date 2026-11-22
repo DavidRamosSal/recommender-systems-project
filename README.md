@@ -39,9 +39,10 @@ scoring. The Mult-VAE files can be loaded on CPU, CUDA or Apple MPS.
 ### Part 2
 
 `scripts/run_part2.py` compares Most Popular, item-kNN, BPR-MF, Markov chain and
-Mult-VAE on the Part 1 split. Each gets 60 validation settings. The popularity
-windows and Markov orders match the Markov comparison below. Mult-VAE uses the
-notebook's reference configuration and 59 distinct random configurations. Each
+Mult-VAE on the Part 1 split. Markov uses orders 1, 2 and 3. Each other model
+gets 60 validation settings. The popularity windows match the Markov comparison
+below. Mult-VAE uses the notebook's reference configuration and 59 distinct
+random configurations. Each
 trial trains for up to 100 epochs, stopping after 10 epochs without improvement
 in validation NDCG@10. The final fits use the winning trial's best epoch.
 PyTorch uses CUDA or Apple MPS when available and runs on CPU otherwise.
@@ -82,8 +83,9 @@ splits.
 uv run --locked scripts/run_markov.py --data-dir data/ml-1m
 ```
 
-Each model gets a 60-setting validation grid. Markov tries orders 1–60 and
-item-kNN uses its Part 1 grid. Most Popular tries all-time counts and 29 recent
+Markov tries histories of one, two and three liked movies. Longer sequences
+rarely recur in this dataset. Item-kNN uses its 60-setting Part 1 grid.
+Most Popular tries all-time counts and 29 recent
 windows (weekly from 7 to 182 days, plus 30, 90, and 180 days), each with all
 ratings or only ratings of at least 4. Selection uses NDCG@10, with ties
 favoring the smaller Markov order. The Markov table records how many users

@@ -39,6 +39,7 @@ from recsys.experiment import (
     pairwise_tests, search_space, seed_mean, sparsity_ablation, tune,
 )
 from recsys.models import BPR, ItemKNN, MarkovChain
+from recsys.models.markov import VALIDATION_ORDERS
 from recsys.models.most_popular import MostPopular, validation_configs as popularity_configs
 from recsys.models.multvae import MultVAE, validation_configs as multvae_configs
 from recsys.outputs import OutputPaths, copy_outputs
@@ -73,7 +74,7 @@ def model_specs(budget: int = BUDGET) -> list[ModelSpec]:
                   search_space(BPR_GRID, budget, SEARCH_SEED), self_implemented=True),
         ModelSpec("markov", "Markov chain", "sequential",
                   lambda p, seed: MarkovChain(**p),
-                  [{"order": order} for order in range(1, budget + 1)], deterministic=True),
+                  [{"order": order} for order in VALIDATION_ORDERS[:budget]], deterministic=True),
         ModelSpec("multvae", "Mult-VAE", "neural", lambda p, seed: MultVAE(**p, seed=seed),
                   multvae_configs(budget), tuning_seed=42),
     ]
@@ -110,7 +111,7 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
     test_window = make_window(history, test, user_ids, catalogue)
     weights = paths.root / "weights"
     manifest = {"ratings_sha256": ratings_digest(ratings), "seeds": list(seeds),
-                "budget": budget, "models": [s.key for s in specs], "ablation": ablation}
+                "trials_per_model": {s.key: len(s.configs) for s in specs}, "ablation": ablation}
     if saved_dir is None:
         weights.mkdir(parents=True, exist_ok=True)
         (weights / "manifest.json").unlink(missing_ok=True)

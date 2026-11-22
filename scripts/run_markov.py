@@ -10,6 +10,7 @@ from recsys.data import load_movielens
 from recsys.evaluation import bootstrap_ci, evaluation_users, ranking_metrics
 from recsys.models import ItemKNN, MarkovChain
 from recsys.models.item_knn import interaction_matrix
+from recsys.models.markov import VALIDATION_ORDERS
 from recsys.models.most_popular import MostPopular, validation_configs
 from recsys.ranking import top_k_items
 from recsys.splitting import temporal_split_by_date
@@ -18,7 +19,6 @@ from recsys.tuning import selected_settings, tune_itemknn
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "results/markov"
-ORDERS = range(1, 61)
 SEED = 42
 
 
@@ -132,7 +132,7 @@ def run_comparison(ratings, *, order=None, out_dir=OUTPUT_DIR, item_knn_grid=Non
     catalogue = np.sort(ratings.item_id.unique())
     train, validation, test = temporal_split_by_date(ratings, "2001-01-01", "2001-07-01")
 
-    orders = ORDERS if order is None else (order,)
+    orders = VALIDATION_ORDERS if order is None else (order,)
     markov_grid, item_knn_grid, popular_grid, popular_models = validation_search(
         train, validation, user_ids, catalogue, orders, item_knn_grid,
     )
@@ -226,7 +226,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data/ml-1m")
     parser.add_argument("--out-dir", type=Path, default=OUTPUT_DIR)
-    parser.add_argument("--order", type=int, help="Use a fixed order instead of tuning orders 1–60.")
+    parser.add_argument("--order", type=int, help="Use a fixed order instead of tuning orders 1–3.")
     args = parser.parse_args()
     run_comparison(load_movielens(args.data_dir).ratings, order=args.order, out_dir=args.out_dir)
 
