@@ -67,9 +67,10 @@ def model_specs(budget: int = BUDGET) -> list[ModelSpec]:
                   search_space(BPR_GRID, budget, SEARCH_SEED), self_implemented=True),
         ModelSpec("markov", "Markov chain", "Sequential",
                   lambda p, seed: MarkovChain(**p),
-                  [{"order": order} for order in VALIDATION_ORDERS[:budget]], deterministic=True),
+                  [{"order": order} for order in VALIDATION_ORDERS[:budget]],
+                  deterministic=True, self_implemented=True),
         ModelSpec("multvae", "Mult-VAE", "Neural", lambda p, seed: MultVAE(**p, seed=seed),
-                  multvae_configs(budget), tuning_seed=42),
+                  multvae_configs(budget), tuning_seed=42, self_implemented=True),
     ]
 
 
@@ -225,7 +226,7 @@ def export_results(table, trials, destination, setup):
                 notes.append(f"95% seed CI {label} {seed_ci[label]}")
             notes.append(f"95% user-bootstrap CI {label} {user_ci[label]} ({bootstrap})")
         if r["self_implemented"]:
-            notes.insert(0, "Self-implemented (recsys/models/bpr.py)")
+            notes.insert(0, "Self-implemented")
         cumulative_rows.append({
             "Model": r["label"],
             "Variant / settings": ", ".join(f"{k}={v}" for k, v in settings.items()
