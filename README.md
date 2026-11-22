@@ -13,19 +13,25 @@ uv run --locked scripts/run_all.py --data-dir data/ml-1m
 This installs the dependencies pinned in `uv.lock`, downloads MovieLens 1M if the
 default dataset is missing, and generates the data analysis, 60-setting validation
 search, all nine baseline results, and figures (Part 1), followed by the Part 2
-experiments. Add `--parts 1` or `--parts 2` to run only one part. Part 2 takes
-roughly 30 minutes on a laptop CPU; most of it is the BPR validation search.
+experiments and the Markov comparison below. Add `--parts 1` or `--parts 2`
+to run one part.
 
 ### Part 2
 
-`scripts/run_part2.py` (also called by `run_all.py`) runs every Part 2 model through
-the same pipeline in `recsys/experiment.py`: the Part 1 split and protocol, a
-validation search with the same budget of 60 settings per model (smaller spaces are
-searched completely), five seeds (0-4) for stochastic models, user-bootstrap and seed
-intervals, paired Wilcoxon tests between all models (Holm-corrected), a breakdown by
-user activity, item popularity and test period, and a 50 % / 20 % sparsity ablation.
-Results go to `results/part2/` (`results-part2.csv` uses the workbook columns; details
-in `results/part2/intermediate/`, figures in `results/part2/images/`).
+`scripts/run_part2.py` compares Most Popular, item-kNN, BPR-MF, Markov chain and
+Mult-VAE on the Part 1 split. Each gets 60 validation settings. The popularity
+windows and Markov orders match the Markov comparison below. Mult-VAE uses the
+notebook's reference configuration and 59 distinct random configurations. Each
+trial trains for up to 100 epochs, stopping after 10 epochs without improvement
+in validation NDCG@10. The final fits use the winning trial's best epoch.
+PyTorch uses CUDA or Apple MPS when available and runs on CPU otherwise.
+
+The pipeline refits on train + validation, using seeds 0–4 for BPR and Mult-VAE.
+It reports user-bootstrap and seed intervals, paired Wilcoxon tests across
+models (Holm-corrected), metrics by user activity, item popularity and test
+period, and rankings with 100%, 50% and 20% of training interactions.
+The five-model table is `results/part2/results-part2.csv`. Supporting tables and
+figures are in `results/part2/intermediate/` and `results/part2/images/`.
 
 Self-implemented algorithm: BPR-MF in `recsys/models/bpr.py` (numpy only).
 Correctness checks: `uv run --locked python tests/test_part2.py`.
@@ -34,9 +40,11 @@ To add a model, append a `ModelSpec` in `model_specs()` of `scripts/run_part2.py
 The model needs `fit(history, user_ids=..., catalogue=...)` (or `fit(history)`) and
 `score_users(user_ids, catalogue)` or `score(user_id, item_ids)`.
 
-Seeds: models 0-4, BPR random search 2026, bootstrap 42.
+BPR samples configurations with seed 2026 and fits validation trials with seed 0.
+Mult-VAE uses seed 42 for both its search and validation fits. The user bootstrap
+also uses seed 42.
 
-Final results are saved to `results/results.csv`, figures to `results/images/`,
+Part 1 results are saved to `results/results.csv`, figures to `results/images/`,
 and supporting report tables to `results/intermediate/`.
 
 For an existing dataset, pass `--data-dir /path/to/ml-1m`, pointing to the folder

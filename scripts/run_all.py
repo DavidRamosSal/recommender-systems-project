@@ -21,6 +21,7 @@ from recsys.splitting import temporal_split_by_date
 from recsys.tuning import selected_settings, tune_itemknn
 from download_data import download_data
 from run_baselines import run_baselines
+from run_markov import run_comparison
 from run_part2 import run_part2
 
 
@@ -58,11 +59,11 @@ def main():
 
     matplotlib.use("Agg")
     dataset = load_movielens(data_dir)
-    if 1 in args.parts:
-        run_part1(dataset, data_dir, paths)
+    item_knn_grid = run_part1(dataset, data_dir, paths) if 1 in args.parts else None
     if 2 in args.parts:
         print("Part 2: tuning, comparison, disaggregation and sparsity ablation...", flush=True)
         run_part2(data_dir, paths.root / "part2", dataset=dataset)
+        run_comparison(dataset.ratings, out_dir=paths.root / "markov", item_knn_grid=item_knn_grid)
 
 
 def run_part1(dataset, data_dir, paths):
@@ -84,6 +85,7 @@ def run_part1(dataset, data_dir, paths):
     run_baselines(data_dir, output_dir, plots=True, dataset=dataset, settings=settings)
 
     print(f"Complete: tables, nine baseline test results and figures saved to {output_dir}", flush=True)
+    return grid
 
 
 if __name__ == "__main__":

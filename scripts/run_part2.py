@@ -36,8 +36,9 @@ from recsys.experiment import (
     METRICS, ModelSpec, Setup, disaggregate, final_runs, make_window, overall,
     pairwise_tests, search_space, seed_mean, sparsity_ablation, tune,
 )
-from recsys.models import BPR, ItemKNN
-from recsys.models.most_popular import MostPopular
+from recsys.models import BPR, ItemKNN, MarkovChain
+from recsys.models.most_popular import MostPopular, validation_configs as popularity_configs
+from recsys.models.multvae import MultVAE, validation_configs as multvae_configs
 from recsys.outputs import OutputPaths
 from recsys.splitting import temporal_split_by_date
 from recsys.tuning import FEEDBACKS, K_GRID, SIMILARITIES
@@ -56,23 +57,23 @@ BPR_GRID = {
 
 
 def model_specs(budget: int = BUDGET) -> list[ModelSpec]:
-    mostpop = [{"window": "all", "feedback": f} for f in ("all", "positive")]
-    mostpop += [{"window": "recent", "feedback": f, "recent_days": d}
-                for d in (30, 90, 180) for f in ("all", "positive")]
+    if not 1 <= budget <= BUDGET:
+        raise ValueError(f"budget must be between 1 and {BUDGET}.")
     itemknn = [{"similarity": s, "feedback": f, "k": k}
                for s in SIMILARITIES for f in FEEDBACKS for k in K_GRID]
     return [
         ModelSpec("mostpop", "Most Popular", "baseline (Part 1)",
-                  lambda p, seed: MostPopular(**p), mostpop[:budget], deterministic=True),
+                  lambda p, seed: MostPopular(**p), popularity_configs()[:budget], deterministic=True),
         ModelSpec("itemknn", "Item-based kNN", "baseline (Part 1)",
                   lambda p, seed: ItemKNN(**p), itemknn[:budget], deterministic=True),
         ModelSpec("bpr", "BPR-MF (own implementation)", "ranking-loss CF",
                   lambda p, seed: BPR(**p, seed=seed),
                   search_space(BPR_GRID, budget, SEARCH_SEED), self_implemented=True),
-        # Add the other Part 2 models here, e.g.
-        # ModelSpec("multvae", "Mult-VAE", "neural", lambda p, seed: MultVAE(**p, seed=seed),
-        #           search_space(MULTVAE_GRID, budget, SEARCH_SEED)),
-        # ModelSpec("markov", "Markov chain", "sequential", ...),
+        ModelSpec("markov", "Markov chain", "sequential",
+                  lambda p, seed: MarkovChain(**p),
+                  [{"order": order} for order in range(1, budget + 1)], deterministic=True),
+        ModelSpec("multvae", "Mult-VAE", "neural", lambda p, seed: MultVAE(**p, seed=seed),
+                  multvae_configs(budget), tuning_seed=42),
     ]
 
 

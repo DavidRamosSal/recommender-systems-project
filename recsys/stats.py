@@ -39,6 +39,8 @@ def bootstrap_interval(values, *, samples: int = 1000, seed: int = 42
                        ) -> tuple[float, float, float]:
     """Mean and 95 % percentile bootstrap interval, resampling users."""
     v = np.asarray(values, dtype=float)
+    if not len(v):
+        return math.nan, math.nan, math.nan
     rng = np.random.default_rng(seed)
     means = v[rng.integers(0, len(v), size=(samples, len(v)))].mean(axis=1)
     return float(v.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))

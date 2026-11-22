@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from recsys.evaluation import evaluate                                    # noqa: E402
 from recsys.experiment import ModelSpec, make_window, run                 # noqa: E402
 from recsys.models.bpr import BPR, sample_negatives, sigmoid               # noqa: E402
+from recsys.models.multvae import MultVAE, validation_configs
 from recsys.stats import holm, kendall_tau, wilcoxon_signed_rank           # noqa: E402
 
 
@@ -122,6 +123,30 @@ def test_stats_helpers():
     assert np.allclose(holm([0.01, 0.04, 0.03]), [0.03, 0.06, 0.06])
     assert kendall_tau([1, 2, 3], [1, 2, 3]) == 1.0
     assert kendall_tau([1, 2, 3], [3, 2, 1]) == -1.0
+
+
+def test_multvae_refits_selected_epoch_and_preserves_item_ids():
+    configs = validation_configs(60)
+    assert len({tuple(cfg.items()) for cfg in configs}) == 60
+    assert configs[44]["hidden_dim"] == 800 and configs[44]["latent_dim"] == 64
+    history = pd.DataFrame({"user_id": [10, 10, 23], "item_id": [31, 14, 25],
+                            "rating": [5, 2, 4]})
+    users, items = [10, 23, 90], [14, 25, 31, 55]
+    cfg = dict(hidden_dim=8, latent_dim=2, seed=42)
+    scores_by_epoch = []
+
+    def validation(model):
+        scores_by_epoch.append(model.score(10, items))
+        return 1.0 if len(scores_by_epoch) == 2 else 0.0
+
+    tuned = MultVAE(**cfg, epochs=20).fit(history, user_ids=users, catalogue=items,
+                                           validation=validation)
+    assert tuned.best_epoch == 2 and len(scores_by_epoch) == 12
+    np.testing.assert_allclose(tuned.score(10, [31, 14]), scores_by_epoch[1][[2, 0]], atol=1e-6)
+    refit = MultVAE(**cfg, epochs=tuned.best_epoch).fit(history, user_ids=users, catalogue=items)
+    np.testing.assert_allclose(refit.score(10, items), scores_by_epoch[1], atol=1e-5)
+    assert np.isfinite(refit.score(90, items)).all()
+    assert np.isneginf(refit.score(10, [999])).all()
 
 
 if __name__ == "__main__":

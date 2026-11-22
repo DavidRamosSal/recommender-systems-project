@@ -47,6 +47,7 @@ class ModelSpec:
     configs: list[dict]
     deterministic: bool = False
     self_implemented: bool = False
+    tuning_seed: int | None = None
 
 
 @dataclass
@@ -104,12 +105,18 @@ def restrict(window: Window, relevant: np.ndarray) -> Window:
 
 
 # ----------------------------------------------------------------- one run
-def fit_model(model, history, user_ids, catalogue):
+def fit_model(model, history, user_ids, catalogue, validation=None):
     """Pass the fixed user/catalogue axes when fit() accepts them."""
     parameters = inspect.signature(model.fit).parameters
+    kwargs = {}
     if "user_ids" in parameters and "catalogue" in parameters:
-        return model.fit(history, user_ids=user_ids, catalogue=catalogue) or model
-    return model.fit(history) or model  # e.g. MostPopular.fit(train)
+        kwargs.update(user_ids=user_ids, catalogue=catalogue)
+    if validation is not None and "validation" in parameters:
+        def validation_ndcg(fitted):
+            top = top_k_items(fitted.score_users(validation.users), validation.seen)
+            return ranking_metrics(top, validation.relevant)["ndcg"].mean()
+        kwargs["validation"] = validation_ndcg
+    return model.fit(history, **kwargs) or model
 
 
 def score_matrix(model, users, catalogue) -> np.ndarray:
@@ -118,10 +125,11 @@ def score_matrix(model, users, catalogue) -> np.ndarray:
     return np.vstack([np.asarray(model.score(u, catalogue), dtype=np.float64) for u in users])
 
 
-def run(spec: ModelSpec, params: dict, seed: int, window: Window, user_ids, catalogue) -> dict:
+def run(spec: ModelSpec, params: dict, seed: int, window: Window, user_ids, catalogue,
+        *, tuning=False) -> dict:
     model = spec.build(params, seed)
     start = time.perf_counter()
-    model = fit_model(model, window.history, user_ids, catalogue)
+    model = fit_model(model, window.history, user_ids, catalogue, window if tuning else None)
     fit_seconds = time.perf_counter() - start
     top = top_k_items(score_matrix(model, window.users, catalogue), window.seen)
     return {
@@ -129,6 +137,7 @@ def run(spec: ModelSpec, params: dict, seed: int, window: Window, user_ids, cata
         "per_user": per_user_frame(top, window),
         "coverage": np.unique(top).size / len(catalogue),
         "fit_seconds": fit_seconds,
+        "params": {**params, "epochs": model.best_epoch} if hasattr(model, "best_epoch") else params,
         "loss_history": list(getattr(model, "loss_history", []) or []),
     }
 
@@ -150,13 +159,14 @@ def tune(specs, validation: Window, user_ids, catalogue, setup: Setup):
     for spec in specs:
         best = -np.inf
         for n, params in enumerate(spec.configs, 1):
-            r = run(spec, params, setup.seeds[0], validation, user_ids, catalogue)
-            row = {"model": spec.key, "trial": n, "params": json.dumps(params),
+            seed = setup.seeds[0] if spec.tuning_seed is None else spec.tuning_seed
+            r = run(spec, params, seed, validation, user_ids, catalogue, tuning=True)
+            row = {"model": spec.key, "trial": n, "params": json.dumps(r["params"]),
                    **{f"{m}@10": r["per_user"][m].mean() for m in METRICS},
                    "coverage": r["coverage"], "fit_seconds": round(r["fit_seconds"], 2)}
             trials.append(row)
             if row["ndcg@10"] > best:        # first maximum wins, as in Part 1
-                best, selected[spec.key] = row["ndcg@10"], params
+                best, selected[spec.key] = row["ndcg@10"], r["params"]
             setup.progress(f"[tune {spec.key} {n}/{len(spec.configs)}] {params} "
                            f"NDCG@10 {row['ndcg@10']:.4f}", flush=True)
     return pd.DataFrame(trials), selected

@@ -23,6 +23,15 @@ from numpy.typing import NDArray
 SECONDS_PER_DAY = 86_400
 
 
+def validation_configs():
+    """All-time counts and 29 recent windows, each with both feedback treatments."""
+    days = sorted(set(range(7, 183, 7)) | {30, 90, 180})
+    configs = [{"window": "all", "feedback": f} for f in ("all", "positive")]
+    configs.extend({"window": "recent", "feedback": f, "recent_days": d}
+                   for d in days for f in ("all", "positive"))
+    return configs
+
+
 @dataclass
 class MostPopular:
     window: str = "all"

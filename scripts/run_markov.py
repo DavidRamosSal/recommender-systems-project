@@ -10,7 +10,7 @@ from recsys.data import load_movielens
 from recsys.evaluation import bootstrap_ci, evaluation_users, ranking_metrics
 from recsys.models import ItemKNN, MarkovChain
 from recsys.models.item_knn import interaction_matrix
-from recsys.models.most_popular import MostPopular
+from recsys.models.most_popular import MostPopular, validation_configs
 from recsys.ranking import top_k_items
 from recsys.splitting import temporal_split_by_date
 from recsys.tuning import selected_settings, tune_itemknn
@@ -19,7 +19,6 @@ from recsys.tuning import selected_settings, tune_itemknn
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "results/markov"
 ORDERS = range(1, 61)
-RECENT_DAYS = sorted(set(range(7, 183, 7)) | {30, 90, 180})
 SEED = 42
 
 
@@ -63,7 +62,7 @@ def summarize(top, relevant, items=None):
     }
 
 
-def validation_search(train, validation, user_ids, catalogue, orders):
+def validation_search(train, validation, user_ids, catalogue, orders, item_knn_grid=None):
     users, seen, relevant = evaluation_data(train, validation, catalogue)
     print(f"Searching {len(orders)} Markov orders on {len(users)} validation users", flush=True)
     rows = []
@@ -77,12 +76,9 @@ def validation_search(train, validation, user_ids, catalogue, orders):
             print(f"Markov tuning: {len(rows)}/{len(orders)} orders", flush=True)
     markov_grid = pd.DataFrame(rows)
 
-    item_knn_grid = tune_itemknn(train, validation, user_ids, catalogue)
-    popular_models = [MostPopular("all", feedback) for feedback in ("all", "positive")]
-    popular_models += [
-        MostPopular("recent", feedback, days)
-        for days in RECENT_DAYS for feedback in ("all", "positive")
-    ]
+    if item_knn_grid is None:
+        item_knn_grid = tune_itemknn(train, validation, user_ids, catalogue)
+    popular_models = [MostPopular(**params) for params in validation_configs()]
     print(f"Searching {len(popular_models)} Most Popular settings on validation", flush=True)
     popular_grid = pd.DataFrame([
         {"model": model.name, **summarize(
@@ -131,14 +127,14 @@ def paired_differences(tops, relevant, markov_name):
     return pd.DataFrame(rows)
 
 
-def run_comparison(ratings, *, order=None, out_dir=OUTPUT_DIR):
+def run_comparison(ratings, *, order=None, out_dir=OUTPUT_DIR, item_knn_grid=None):
     user_ids = np.sort(ratings.user_id.unique())
     catalogue = np.sort(ratings.item_id.unique())
     train, validation, test = temporal_split_by_date(ratings, "2001-01-01", "2001-07-01")
 
     orders = ORDERS if order is None else (order,)
     markov_grid, item_knn_grid, popular_grid, popular_models = validation_search(
-        train, validation, user_ids, catalogue, orders,
+        train, validation, user_ids, catalogue, orders, item_knn_grid,
     )
     # The grid is in ascending order, so exact ties choose the shorter history.
     best_markov = markov_grid.loc[markov_grid["ndcg@10"].idxmax()]
