@@ -11,7 +11,6 @@ Uses the validation-selected item-kNN configuration without rerunning tuning.
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import numpy as np
@@ -25,17 +24,13 @@ from recsys.evaluation import (
 from recsys.models import ItemKNN
 from recsys.models.item_knn import interaction_matrix
 from recsys.models.most_popular import MostPopular
-from recsys.outputs import OutputPaths
+from recsys.outputs import OutputPaths, update_overall_results
 from recsys.ranking import top_k, top_k_items
 from recsys.splitting import temporal_split_by_date
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SEED = 42
-HEADERS = [
-    "Model", "Variant / settings", "Similarity", "k", "Precision@10",
-    "Recall@10", "NDCG@10", "Catalogue coverage", "Seed", "Notes",
-]
 METRICS = {
     "Precision@10": "precision@10",
     "Recall@10": "recall@10",
@@ -170,12 +165,8 @@ def export_results(popular, comparison, output_dir, settings=None):
         ),
     })
 
-    destination = paths.root / "results.csv"
-    with destination.open("w", encoding="utf-8", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=HEADERS, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"Wrote {len(rows)} baseline test results to {destination}")
+    update_overall_results(paths.root, rows, part=1)
+    print(f"Wrote {len(rows)} baseline test results to {paths.root / 'results.csv'}")
 
 
 def plot_results(results, output_dir, settings=None):

@@ -14,7 +14,6 @@ and figures are under results/part2/.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import tempfile
@@ -34,7 +33,7 @@ from recsys.models import BPR, ItemKNN, MarkovChain
 from recsys.models.markov import VALIDATION_ORDERS
 from recsys.models.most_popular import MostPopular, validation_configs as popularity_configs
 from recsys.models.multvae import MultVAE, validation_configs as multvae_configs
-from recsys.outputs import OutputPaths, copy_outputs
+from recsys.outputs import OutputPaths, copy_outputs, update_overall_results, write_results_csv
 from recsys.splitting import temporal_split_by_date
 from recsys.tuning import FEEDBACKS, K_GRID, SIMILARITIES
 
@@ -161,7 +160,8 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
         taus.to_csv(paths.intermediate / "ablation-tau.csv", index=False)
         info.to_csv(paths.intermediate / "ablation-info.csv", index=False)
 
-    export_results(table, trials, paths.root / "results-part2.csv")
+    rows = export_results(table, trials, paths.root / "results-part2.csv")
+    update_overall_results(root, rows, part=2, partial=models is not None)
     plot_all(specs, runs, disagg, abl, paths.images, root / "bpr")
     if saved_dir is None:
         metadata.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -174,10 +174,6 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
 
 
 # ---------------------------------------------------------------- outputs
-HEADERS = ["Model", "Variant / settings", "Similarity", "k", "Precision@10", "Recall@10",
-           "NDCG@10", "Catalogue coverage", "Seed", "Notes"]
-
-
 def export_results(table, trials, destination):
     """Test rows in the same ten columns as the Part 1 results.csv / workbook."""
     rows = []
@@ -206,10 +202,8 @@ def export_results(table, trials, destination):
             else f"mean over seeds {r['seeds']}",
             "Notes": "; ".join(notes),
         })
-    with open(destination, "w", encoding="utf-8", newline="") as out:
-        writer = csv.DictWriter(out, fieldnames=HEADERS, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
+    write_results_csv(Path(destination), rows)
+    return rows
 
 
 def plot_all(specs, runs, disagg, abl, images, bpr_dir):
@@ -229,18 +223,33 @@ def plot_all(specs, runs, disagg, abl, images, bpr_dir):
         plt.close(fig)
 
     if abl is not None:
-        fig, ax = plt.subplots(figsize=(4.2, 2.8))
-        for key, g in abl.groupby("model", sort=False):
+        fig, (accuracy, coverage) = plt.subplots(1, 2, figsize=(7.2, 2.65), sharex=True)
+        markers = ["o", "s", "^", "D", "v"]
+        for i, (key, g) in enumerate(abl.groupby("model", sort=False)):
             g = g.sort_values("fraction")
-            low = (g["ndcg@10"] - g["ndcg@10_ci_low"]).fillna(0)
-            high = (g["ndcg@10_ci_high"] - g["ndcg@10"]).fillna(0)
-            ax.errorbar(100 * g["fraction"], g["ndcg@10"], yerr=[low, high], marker="o",
-                        ms=3, capsize=2, label=labels[key])
-        ax.set_xticks([20, 50, 100])
-        ax.set_xlabel("Share of training interactions kept (%)")
-        ax.set_ylabel("Test NDCG@10")
-        ax.grid(alpha=.25)
-        ax.legend(frameon=False, fontsize=7)
+            x = 100 * g["fraction"]
+            style = dict(marker=markers[i % len(markers)], ms=4, lw=1.5,
+                         color=f"C{i % 10}", label=labels[key].removesuffix(" (own)"))
+            accuracy.plot(x, g["ndcg@10"], **style)
+            intervals = g.dropna(subset=["ndcg@10_ci_low", "ndcg@10_ci_high"])
+            low = intervals["ndcg@10"] - intervals["ndcg@10_ci_low"]
+            high = intervals["ndcg@10_ci_high"] - intervals["ndcg@10"]
+            accuracy.errorbar(100 * intervals["fraction"], intervals["ndcg@10"],
+                              yerr=[low, high], fmt="none", color=style["color"],
+                              elinewidth=.85, capsize=2)
+            coverage.plot(x, 100 * g["coverage"], **style)
+        accuracy.set_ylabel("Test NDCG@10")
+        coverage.set_ylabel("Catalogue coverage (%)")
+        coverage.set_ylim(bottom=0)
+        accuracy.set_xlim(105, 15)
+        for ax in (accuracy, coverage):
+            ax.set_xticks([100, 50, 20])
+            ax.set_xlabel("Training interactions retained (%)")
+            ax.grid(axis="y", alpha=.22)
+        handles, model_names = accuracy.get_legend_handles_labels()
+        fig.legend(handles, model_names, loc="lower center", ncol=min(5, len(handles)),
+                   frameon=False, fontsize=8)
+        fig.tight_layout(rect=(0, .12, 1, 1))
         save(fig, "ablation")
 
     nd = disagg[disagg.metric == "ndcg@10"]

@@ -80,7 +80,9 @@ BPR samples configurations with seed 2026 and fits validation trials with seed 0
 Mult-VAE uses seed 42 for both its search and validation fits. The user bootstrap
 also uses seed 42.
 
-The nine Part 1 baseline results are in `results/results.csv`. Their detailed
+The cumulative [results.csv](results/results.csv) contains the nine Part 1
+baseline variants and the five overall Part 2 evaluations. Part 2 rows are
+identified in the existing `Notes` column. Detailed Part 1
 scores are in each baseline folder's `part1-results.csv`. Dataset summaries
 and shared figures are in `results/intermediate/` and `results/images/`.
 
