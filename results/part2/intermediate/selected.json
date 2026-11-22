@@ -1,0 +1,19 @@
+{
+  "mostpop": {
+    "window": "recent",
+    "feedback": "positive",
+    "recent_days": 30
+  },
+  "itemknn": {
+    "similarity": "cosine",
+    "feedback": "positives",
+    "k": 500
+  },
+  "bpr": {
+    "feedback": "positives",
+    "factors": 128,
+    "lr": 0.025,
+    "reg": 0.005,
+    "epochs": 40
+  }
+}

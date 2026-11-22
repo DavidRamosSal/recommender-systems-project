@@ -1,6 +1,7 @@
-"""Reproduce all implemented Part 1 report numbers, tables, results and figures.
+"""Reproduce all report numbers, tables, results and figures (Parts 1 and 2).
 
     uv run --locked scripts/run_all.py --data-dir data/ml-1m
+    uv run --locked scripts/run_all.py --data-dir data/ml-1m --parts 2   # Part 2 only
 
 Downloads MovieLens 1M if the default dataset is missing. For an existing copy,
 --data-dir must name the directory containing ratings.dat, movies.dat and users.dat.
@@ -20,6 +21,7 @@ from recsys.splitting import temporal_split_by_date
 from recsys.tuning import selected_settings, tune_itemknn
 from download_data import download_data
 from run_baselines import run_baselines
+from run_part2 import run_part2
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,16 +48,26 @@ def main():
                         help="Existing MovieLens directory (default: data/ml-1m; downloaded if missing).")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "results",
                         help="Directory for generated tables and figures (default: results).")
+    parser.add_argument("--parts", nargs="+", type=int, choices=(1, 2), default=[1, 2],
+                        help="Which parts to reproduce (default: 1 2).")
     args = parser.parse_args()
     data_dir = ensure_data(args.data_dir)
     paths = OutputPaths(args.out_dir.resolve()).create()
-    output_dir = paths.root
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "recsys-matplotlib"))
     import matplotlib
 
     matplotlib.use("Agg")
-    print("Loading MovieLens and regenerating data characterization...", flush=True)
     dataset = load_movielens(data_dir)
+    if 1 in args.parts:
+        run_part1(dataset, data_dir, paths)
+    if 2 in args.parts:
+        print("Part 2: tuning, comparison, disaggregation and sparsity ablation...", flush=True)
+        run_part2(data_dir, paths.root / "part2", dataset=dataset)
+
+
+def run_part1(dataset, data_dir, paths):
+    output_dir = paths.root
+    print("Loading MovieLens and regenerating data characterization...", flush=True)
     characterize_data(dataset, output_dir)
     ratings = dataset.ratings
     user_ids = np.sort(ratings.user_id.unique())
