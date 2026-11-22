@@ -283,16 +283,22 @@ def disaggregate(specs, runs, test: Window, user_ids, catalogue, setup: Setup):
     for spec in specs:
         for (dimension, group), w in groups.items():
             index = pd.Index(test.users).get_indexer(w.users)
-            per_seed = [per_user_frame(r["top"][index], w) for r in runs[spec.key]]
+            top_lists = [r["top"][index] for r in runs[spec.key]]
+            per_seed = [per_user_frame(top, w) for top in top_lists]
+            group_info = {"model": spec.key, "dimension": dimension, "group": group,
+                          "users": len(w.users), "relevant_items": int(w.relevant.sum())}
             for m in METRICS:
                 values = pd.concat([p[m] for p in per_seed], axis=1).mean(axis=1)
                 mean, lo, hi = bootstrap_interval(values, samples=setup.bootstrap_samples,
                                                   seed=setup.bootstrap_seed)
-                rows.append({"model": spec.key, "dimension": dimension, "group": group,
-                             "metric": f"{m}@10", "users": len(values), "mean": mean,
-                             "user_ci_low": lo, "user_ci_high": hi,
-                             "relevant_items": int(w.relevant.sum())})
-    return pd.DataFrame(rows), thresholds
+                rows.append({**group_info, "metric": f"{m}@10", "mean": mean,
+                             "user_ci_low": lo, "user_ci_high": hi})
+            # As in the workbook, use the eligible users' complete lists and the full catalogue.
+            coverage = float(np.mean([np.unique(top).size / len(catalogue) for top in top_lists]))
+            rows.append({**group_info, "metric": "coverage", "mean": coverage})
+    columns = ["model", "dimension", "group", "metric", "users", "mean",
+               "user_ci_low", "user_ci_high", "relevant_items"]
+    return pd.DataFrame(rows, columns=columns), thresholds
 
 
 # ----------------------------------------------------------------- 5. ablation

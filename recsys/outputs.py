@@ -12,14 +12,18 @@ RESULT_COLUMNS = [
     "Model", "Variant / settings", "Similarity", "k", "Precision@10",
     "Recall@10", "NDCG@10", "Catalogue coverage", "Seed", "Notes",
 ]
+PART2_RESULT_COLUMNS = [
+    "Model", "Paradigm", "Self-implemented?", "Key hyperparameters", "Precision@10",
+    "Recall@10", "NDCG@10", "Catalogue coverage", "Variability / CI / test", "Seed(s)", "Notes",
+]
 PART2_PREFIX = "Part 2. "
 
 
-def write_results_csv(path, rows):
+def write_results_csv(path, rows, *, columns=RESULT_COLUMNS):
     with TemporaryDirectory(dir=path.parent) as directory:
         staged = Path(directory) / path.name
         with staged.open("w", encoding="utf-8", newline="") as output:
-            writer = csv.DictWriter(output, fieldnames=RESULT_COLUMNS, lineterminator="\n")
+            writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
             writer.writeheader()
             writer.writerows(rows)
         staged.replace(path)

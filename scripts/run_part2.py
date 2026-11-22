@@ -33,7 +33,9 @@ from recsys.models import BPR, ItemKNN, MarkovChain
 from recsys.models.markov import VALIDATION_ORDERS
 from recsys.models.most_popular import MostPopular, validation_configs as popularity_configs
 from recsys.models.multvae import MultVAE, validation_configs as multvae_configs
-from recsys.outputs import OutputPaths, copy_outputs, update_overall_results, write_results_csv
+from recsys.outputs import (
+    PART2_RESULT_COLUMNS, OutputPaths, copy_outputs, update_overall_results, write_results_csv,
+)
 from recsys.splitting import temporal_split_by_date
 from recsys.tuning import FEEDBACKS, K_GRID, SIMILARITIES
 
@@ -56,17 +58,17 @@ def model_specs(budget: int = BUDGET) -> list[ModelSpec]:
     itemknn = [{"similarity": s, "feedback": f, "k": k}
                for s in SIMILARITIES for f in FEEDBACKS for k in K_GRID]
     return [
-        ModelSpec("mostpop", "Most Popular", "baseline (Part 1)",
+        ModelSpec("mostpop", "Most Popular", "Popularity",
                   lambda p, seed: MostPopular(**p), popularity_configs()[:budget], deterministic=True),
-        ModelSpec("itemknn", "Item-based kNN", "baseline (Part 1)",
+        ModelSpec("itemknn", "Item-based kNN", "Neighbourhood CF",
                   lambda p, seed: ItemKNN(**p), itemknn[:budget], deterministic=True),
-        ModelSpec("bpr", "BPR-MF (own implementation)", "ranking-loss CF",
+        ModelSpec("bpr", "BPR-MF (own implementation)", "Ranking-loss CF",
                   lambda p, seed: BPR(**p, seed=seed),
                   search_space(BPR_GRID, budget, SEARCH_SEED), self_implemented=True),
-        ModelSpec("markov", "Markov chain", "sequential",
+        ModelSpec("markov", "Markov chain", "Sequential",
                   lambda p, seed: MarkovChain(**p),
                   [{"order": order} for order in VALIDATION_ORDERS[:budget]], deterministic=True),
-        ModelSpec("multvae", "Mult-VAE", "neural", lambda p, seed: MultVAE(**p, seed=seed),
+        ModelSpec("multvae", "Mult-VAE", "Neural", lambda p, seed: MultVAE(**p, seed=seed),
                   multvae_configs(budget), tuning_seed=42),
     ]
 
@@ -160,7 +162,7 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
         taus.to_csv(paths.intermediate / "ablation-tau.csv", index=False)
         info.to_csv(paths.intermediate / "ablation-info.csv", index=False)
 
-    rows = export_results(table, trials, paths.root / "results-part2.csv")
+    rows = export_results(table, trials, paths.root / "results-part2.csv", setup)
     update_overall_results(root, rows, part=2, partial=models is not None)
     plot_all(specs, runs, disagg, abl, paths.images, root / "bpr")
     if saved_dir is None:
@@ -174,36 +176,60 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
 
 
 # ---------------------------------------------------------------- outputs
-def export_results(table, trials, destination):
-    """Test rows in the same ten columns as the Part 1 results.csv / workbook."""
-    rows = []
+def export_results(table, trials, destination, setup):
+    """Write the Part 2 template and return rows for the cumulative results.csv."""
+    part2_rows, cumulative_rows = [], []
     for r in table.to_dict("records"):
         settings = json.loads(r["settings"])
-        tried = int((trials.model == r["model"]).sum())
-        notes = [f"Selected on validation NDCG@10 among {tried} settings",
+        validation_scores = trials.loc[trials.model == r["model"], "ndcg@10"]
+        seeds = r["seeds"].split()
+        deterministic = r["seeds"] == "deterministic"
+        metrics = {"Precision@10": r["precision@10"], "Recall@10": r["recall@10"],
+                   "NDCG@10": r["ndcg@10"], "Catalogue coverage": r["coverage"]}
+        user_ci = {label: f"[{r[f'{m}@10_user_ci_low']:.4f}, {r[f'{m}@10_user_ci_high']:.4f}]"
+                   for m, label in (("precision", "Precision@10"), ("recall", "Recall@10"),
+                                    ("ndcg", "NDCG@10"))}
+        seed_ci = {label: f"[{r[f'{m}@10_seed_ci_low']:.4f}, {r[f'{m}@10_seed_ci_high']:.4f}]"
+                   for m, label in (("ndcg", "NDCG@10"), ("recall", "Recall@10"))}
+        bootstrap = f"{setup.bootstrap_samples} samples, seed {setup.bootstrap_seed}"
+
+        variability = f"95% user bootstrap ({bootstrap}). "
+        variability += ", ".join(f"{label} {ci}" for label, ci in user_ci.items()) + "."
+        if len(seeds) > 1:
+            variability += f" 95% across fits, NDCG@10 {seed_ci['NDCG@10']}."
+        part2_rows.append({
+            "Model": r["label"].removesuffix(" (own implementation)"),
+            "Paradigm": r["paradigm"],
+            "Self-implemented?": "Yes" if r["self_implemented"] else "No",
+            "Key hyperparameters": ", ".join(f"{k}={v}" for k, v in settings.items()),
+            **metrics,
+            "Variability / CI / test": variability,
+            "Seed(s)": "Deterministic" if deterministic else ", ".join(seeds),
+            "Notes": (f"Best validation NDCG@10 {validation_scores.max():.4f} across "
+                      f"{len(validation_scores)} settings. Refit on train + validation. "
+                      f"Test: {r['users']} users."),
+        })
+
+        notes = [f"Selected on validation NDCG@10 among {len(validation_scores)} settings",
                  f"test users {r['users']}"]
-        for m, label in (("ndcg", "NDCG@10"), ("recall", "Recall@10")):
-            if r["seeds"] != "deterministic":
-                notes.append(f"95% seed CI {label} [{r[f'{m}@10_seed_ci_low']:.4f}, "
-                             f"{r[f'{m}@10_seed_ci_high']:.4f}]")
-            notes.append(f"95% user-bootstrap CI {label} [{r[f'{m}@10_user_ci_low']:.4f}, "
-                         f"{r[f'{m}@10_user_ci_high']:.4f}] (1000 samples, seed 42)")
+        for label in seed_ci:
+            if not deterministic:
+                notes.append(f"95% seed CI {label} {seed_ci[label]}")
+            notes.append(f"95% user-bootstrap CI {label} {user_ci[label]} ({bootstrap})")
         if r["self_implemented"]:
             notes.insert(0, "Self-implemented (recsys/models/bpr.py)")
-        rows.append({
+        cumulative_rows.append({
             "Model": r["label"],
             "Variant / settings": ", ".join(f"{k}={v}" for k, v in settings.items()
                                             if k not in ("similarity", "k")),
             "Similarity": settings.get("similarity", "–"),
             "k": str(settings.get("k", "–")),
-            "Precision@10": r["precision@10"], "Recall@10": r["recall@10"],
-            "NDCG@10": r["ndcg@10"], "Catalogue coverage": r["coverage"],
-            "Seed": "deterministic" if r["seeds"] == "deterministic"
-            else f"mean over seeds {r['seeds']}",
+            **metrics,
+            "Seed": "deterministic" if deterministic else f"mean over seeds {r['seeds']}",
             "Notes": "; ".join(notes),
         })
-    write_results_csv(Path(destination), rows)
-    return rows
+    write_results_csv(Path(destination), part2_rows, columns=PART2_RESULT_COLUMNS)
+    return cumulative_rows
 
 
 def plot_all(specs, runs, disagg, abl, images, bpr_dir):
