@@ -14,6 +14,16 @@ def ratings_digest(ratings):
     return hashlib.sha256(ratings[columns].to_numpy(dtype="<i8").tobytes()).hexdigest()
 
 
+def invalidate_mismatched_runs(root, digest):
+    """Shared baseline weights can only describe one ratings dataset at a time."""
+    part1 = root / "intermediate/ratings.sha256"
+    part2 = root / "part2/manifest.json"
+    if part1.is_file() and part1.read_text().strip() != digest:
+        part1.unlink()
+    if part2.is_file() and json.loads(part2.read_text())["ratings_sha256"] != digest:
+        part2.unlink()
+
+
 def save_weights(path, model, params, seed, fit_seconds):
     path.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=path.parent) as temp:

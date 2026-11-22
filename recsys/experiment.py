@@ -175,15 +175,18 @@ def tune(specs, validation: Window, user_ids, catalogue, setup: Setup):
 
 # ----------------------------------------------------------------- 2. final
 def final_runs(specs, selected, test: Window, user_ids, catalogue, setup: Setup, tag="test",
-               *, weights_dir=None, restore=False):
+               *, results_dir=None, restore=False):
     runs = {}
     for spec in specs:
         runs[spec.key] = []
-        for seed in (setup.seeds[:1] if spec.deterministic else setup.seeds):
+        for seed in ((0,) if spec.deterministic else setup.seeds):
             checkpoint = None
-            if weights_dir is not None:
-                filename = spec.key if spec.deterministic else f"{spec.key}-seed{seed}"
-                checkpoint = weights_dir / f"{filename}.npz"
+            if results_dir is not None:
+                filename = f"seed-{seed}"
+                if spec.deterministic:
+                    model = spec.build(selected[spec.key], seed)
+                    filename = f"{getattr(model, 'name', spec.key)}-test"
+                checkpoint = results_dir / spec.key / "weights" / f"{filename}.npz"
             r = run(spec, selected[spec.key], seed, test, user_ids, catalogue,
                     checkpoint=checkpoint, restore=restore)
             runs[spec.key].append(r)

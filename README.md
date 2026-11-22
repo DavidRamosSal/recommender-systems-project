@@ -29,12 +29,26 @@ An output directory containing its own checkpoints uses those. The runner checks
 the ratings against the saved training run. For a different dataset, pass
 `--retrain --data-dir /path/to/ml-1m --out-dir /path/to/new-results`.
 
-Part 1 stores a validation fit and a final test fit for each of its nine
-variants in `results/weights/`. Part 2 stores the five selected models in
-`results/part2/weights/`, with one final fit per deterministic model and one per
-seed (0–4) for BPR and Mult-VAE. Each compressed NumPy file contains the fitted
-parameters, original MovieLens IDs or histories, and settings needed for
-scoring. The Mult-VAE files can be loaded on CPU, CUDA or Apple MPS.
+### Where to find a model's results
+
+Each model has a folder directly under `results/`.
+
+| Folder | Model |
+| --- | --- |
+| `mostpop/` | Most Popular |
+| `itemknn/` | Item-based kNN |
+| `bpr/` | Bayesian personalized ranking |
+| `markov/` | Markov chain |
+| `multvae/` | Multinomial variational autoencoder |
+
+Each folder contains `weights/`, `tuning.csv`, `selected.json`, `test.csv`,
+`disaggregated.csv`, and `ablation.csv`. For example,
+`results/bpr/ablation.csv` gives BPR's results at 100%, 50%, and 20% of training
+data. BPR and Mult-VAE save one final checkpoint per seed (0–4). The two
+baseline folders also contain their Part 1 validation and test fits. Both
+parts use the same item-kNN checkpoint when they select the same settings.
+Each NumPy checkpoint stores the fitted parameters and MovieLens IDs needed
+for scoring. Mult-VAE weights can be loaded on CPU, CUDA or Apple MPS.
 
 ### Part 2
 
@@ -51,8 +65,9 @@ The pipeline refits on train + validation, using seeds 0–4 for BPR and Mult-VA
 It reports user-bootstrap and seed intervals, paired Wilcoxon tests across
 models (Holm-corrected), metrics by user activity, item popularity and test
 period, and rankings with 100%, 50% and 20% of training interactions.
-The five-model table is `results/part2/results-part2.csv`. Supporting tables and
-figures are in `results/part2/intermediate/` and `results/part2/images/`.
+The five-model table is `results/part2/results-part2.csv`. Cross-model
+statistics are in `results/part2/intermediate/` and comparison plots are in
+`results/part2/images/`. The BPR training-loss plot is in `results/bpr/`.
 
 Self-implemented algorithm: BPR-MF in `recsys/models/bpr.py` (numpy only).
 Correctness checks: `uv run --locked python tests/test_part2.py`.
@@ -65,8 +80,9 @@ BPR samples configurations with seed 2026 and fits validation trials with seed 0
 Mult-VAE uses seed 42 for both its search and validation fits. The user bootstrap
 also uses seed 42.
 
-Part 1 results are saved to `results/results.csv`, figures to `results/images/`,
-and supporting report tables to `results/intermediate/`.
+The nine Part 1 baseline results are in `results/results.csv`. Their detailed
+scores are in each baseline folder's `part1-results.csv`. Dataset summaries
+and shared figures are in `results/intermediate/` and `results/images/`.
 
 For an existing dataset, pass `--data-dir /path/to/ml-1m`, pointing to the folder
 containing `ratings.dat`, `movies.dat` and `users.dat`. Use `--out-dir /path/to/results`
@@ -92,7 +108,10 @@ favoring the smaller Markov order. The Markov table records how many users
 match a learned state at each order. Pass `--order 2` for a fixed-order comparison
 or `--out-dir` to change where the CSVs are written.
 
-Test results go to `results/markov/`. The paired table gives Markov-minus-baseline
+The supplementary Markov comparison writes its order search and test tables
+to `results/markov/`, the item-kNN grid to `results/itemknn/part1-tuning.csv`,
+and the popularity grid to `results/mostpop/window-tuning.csv`.
+The paired table gives Markov-minus-baseline
 NDCG@10 differences, 95% user-bootstrap intervals, and two-sided paired
 randomization p-values at each training fraction. Most Popular includes the
 validation winner and the all-time positive-rating reference.

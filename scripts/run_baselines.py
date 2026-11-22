@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from recsys.checkpoints import prepare_model
+from recsys.checkpoints import invalidate_mismatched_runs, prepare_model, ratings_digest
 from recsys.data import load_movielens
 from recsys.evaluation import (
     bootstrap_ci, evaluate, evaluation_users, per_user_ndcg, ranking_metrics,
@@ -66,7 +66,9 @@ def most_popular_results(train, validation, test, catalogue, *, weights_dir=None
             ("validation", train, validation),
             ("test", pd.concat([train, validation]), test),
         ):
-            params = {"window": model.window, "feedback": model.feedback, "recent_days": model.recent_days}
+            params = {"window": model.window, "feedback": model.feedback}
+            if model.window == "recent":
+                params["recent_days"] = model.recent_days
             checkpoint = weights_dir / f"{model.name}-{split}.npz" if weights_dir else None
             model, _ = prepare_model(model, lambda: model.fit(history), params,
                                      checkpoint=checkpoint, restore=restore)
@@ -96,7 +98,7 @@ def itemknn_results(train, validation, test, user_ids, catalogue, settings=None,
         relevant = interaction_matrix(window, user_ids, catalogue)[indices]
         seen = interaction_matrix(history, user_ids, catalogue, positives_only=False)[indices]
         model = ItemKNN(**(settings or {}))
-        checkpoint = weights_dir / f"itemknn-{split}.npz" if weights_dir else None
+        checkpoint = weights_dir / f"{model.name}-{split}.npz" if weights_dir else None
         params = {"similarity": model.similarity, "feedback": model.feedback, "k": model.k}
         model, _ = prepare_model(model, lambda: model.fit(history, user_ids=user_ids, catalogue=catalogue),
                                  params, checkpoint=checkpoint, restore=restore)
@@ -246,7 +248,7 @@ def plot_results(results, output_dir, settings=None):
 
 def run_baselines(
     data_dir=ROOT / "data/ml-1m", output_dir=ROOT / "results", *,
-    plots=False, dataset=None, settings=None, weights_dir=None, restore=False,
+    plots=False, dataset=None, settings=None, saved_dir=None,
 ):
     """Compute and export baselines; run_all can supply freshly tuned settings."""
     dataset = load_movielens(data_dir) if dataset is None else dataset
@@ -255,17 +257,24 @@ def run_baselines(
     user_ids = np.sort(ratings["user_id"].unique())
     catalogue = np.sort(ratings["item_id"].unique())
     train, validation, test = temporal_split_by_date(ratings, "2001-01-01", "2001-07-01")
+    source = Path(saved_dir or output_dir)
+    if saved_dir is None:
+        invalidate_mismatched_runs(source, ratings_digest(ratings))
     popular = most_popular_results(train, validation, test, catalogue,
-                                   weights_dir=weights_dir, restore=restore)
+                                   weights_dir=source / "mostpop/weights", restore=saved_dir is not None)
     columns = ["model", "split", "users", "precision@10", "recall@10", "ndcg@10", "catalogue_coverage"]
     validation_rows = popular[popular.split == "validation"]
     selected = validation_rows.loc[validation_rows["ndcg@10"].idxmax(), "model"]
     comparisons = list(dict.fromkeys([selected, "mostpop_alltime_pos4"]))
     if len(comparisons) == 1:
         comparisons.append("mostpop_recent30d_pos4")
+    knn = itemknn_results(train, validation, test, user_ids, catalogue, settings,
+                          weights_dir=source / "itemknn/weights", restore=saved_dir is not None)
+    for key, frame in (("mostpop", popular), ("itemknn", knn)):
+        (paths.root / key).mkdir(parents=True, exist_ok=True)
+        frame.to_csv(paths.root / key / "part1-results.csv", index=False)
     comparison = pd.concat([
-        itemknn_results(train, validation, test, user_ids, catalogue, settings,
-                        weights_dir=weights_dir, restore=restore),
+        knn,
         popular[popular.model.isin(comparisons)][columns],
     ], ignore_index=True)
 

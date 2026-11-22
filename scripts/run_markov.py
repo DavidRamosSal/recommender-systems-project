@@ -18,7 +18,7 @@ from recsys.tuning import selected_settings, tune_itemknn
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT / "results/markov"
+OUTPUT_DIR = ROOT / "results"
 SEED = 42
 
 
@@ -203,15 +203,15 @@ def run_comparison(ratings, *, order=None, out_dir=OUTPUT_DIR, item_knn_grid=Non
         sparsity.groupby("training_fraction")["ndcg@10"].rank(method="min", ascending=False).astype(int)
     )
     sparsity = sparsity.sort_values(["training_fraction", "rank_by_ndcg"], ascending=[False, True])
-    out_dir.mkdir(parents=True, exist_ok=True)
     for filename, table in (
-        ("order-tuning.csv", markov_grid),
-        ("itemknn-tuning.csv", item_knn_grid),
-        ("most-popular-tuning.csv", popular_grid),
-        ("disaggregated-test.csv", groups),
-        ("paired-test.csv", paired),
-        ("sparsity-ablation.csv", sparsity),
+        ("markov/order-tuning.csv", markov_grid),
+        ("itemknn/part1-tuning.csv", item_knn_grid),
+        ("mostpop/window-tuning.csv", popular_grid),
+        ("markov/disaggregated-test.csv", groups),
+        ("markov/paired-test.csv", paired),
+        ("markov/sparsity-ablation.csv", sparsity),
     ):
+        (out_dir / filename).parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(out_dir / filename, index=False)
     for title, table in (
         ("Full-data test results by group", groups),

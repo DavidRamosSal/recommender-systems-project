@@ -6,17 +6,9 @@ Same split and protocol as Part 1 (see scripts/run_baselines.py). Every model
 gets the same validation budget (BUDGET settings; smaller spaces are searched
 exhaustively). Seeds: models 0-4, BPR random search 2026, bootstrap 42.
 
-Outputs (default results/part2/):
-    weights/                     selected full-history model, one file per fit
-    results-part2.csv            test results in the results-workbook columns
-    intermediate/tuning.csv      every validation trial
-    intermediate/selected.json   selected setting per model
-    intermediate/overall.csv     test metrics, seed CI and user-bootstrap CI
-    intermediate/pairwise.csv    paired per-user tests, all model pairs (Holm)
-    intermediate/disaggregated.csv, subgroups.json
-    intermediate/ablation.csv, ablation-tau.csv, ablation-info.csv
-    intermediate/per-user-ndcg.csv
-    images/ablation.png|svg, disaggregation.png|svg, bpr-loss.png|svg
+Each model has its own directory under results/ for weights, trials, selected settings,
+test and subgroup metrics, and training-data ablations. Cross-model comparisons
+and figures are under results/part2/.
 """
 
 from __future__ import annotations
@@ -33,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from recsys.data import load_movielens
-from recsys.checkpoints import ratings_digest
+from recsys.checkpoints import invalidate_mismatched_runs, ratings_digest
 from recsys.experiment import (
     METRICS, ModelSpec, Setup, disaggregate, final_runs, make_window, overall,
     pairwise_tests, search_space, seed_mean, sparsity_ablation, tune,
@@ -84,7 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data/ml-1m")
-    parser.add_argument("--out-dir", type=Path, default=ROOT / "results/part2")
+    parser.add_argument("--out-dir", type=Path, default=ROOT / "results")
     parser.add_argument("--models", nargs="*", help="subset of model keys")
     parser.add_argument("--budget", type=int, default=BUDGET,
                         help="validation settings per model (quick checks only)")
@@ -98,7 +90,8 @@ def main():
 def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 3, 4),
               ablation=True, dataset=None, saved_dir=None):
     started = time.perf_counter()
-    paths = OutputPaths(out_dir).create()
+    root = Path(out_dir)
+    paths = OutputPaths(root / "part2").create()
     setup = Setup(seeds=seeds)
     dataset = load_movielens(data_dir) if dataset is None else dataset
     ratings = dataset.ratings
@@ -109,56 +102,69 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
 
     specs = [s for s in model_specs(budget) if models is None or s.key in models]
     test_window = make_window(history, test, user_ids, catalogue)
-    weights = paths.root / "weights"
+    source = Path(saved_dir) if saved_dir is not None else root
+    for spec in specs:
+        (root / spec.key).mkdir(parents=True, exist_ok=True)
     manifest = {"ratings_sha256": ratings_digest(ratings), "seeds": list(seeds),
                 "trials_per_model": {s.key: len(s.configs) for s in specs}, "ablation": ablation}
+    metadata = source / "part2/manifest.json"
     if saved_dir is None:
-        weights.mkdir(parents=True, exist_ok=True)
-        (weights / "manifest.json").unlink(missing_ok=True)
+        if any(s.key in ("mostpop", "itemknn") for s in specs):
+            invalidate_mismatched_runs(root, manifest["ratings_sha256"])
+        metadata.unlink(missing_ok=True)
         val_window = make_window(train, validation, user_ids, catalogue)
         print(f"Part 2: {len(specs)} models, budget {budget}, seeds {list(seeds)}; "
               f"{len(val_window.users)} validation / {len(test_window.users)} test users", flush=True)
         trials, selected = tune(specs, val_window, user_ids, catalogue, setup)
-        trials.to_csv(paths.intermediate / "tuning.csv", index=False)
-        (paths.intermediate / "selected.json").write_text(json.dumps(selected, indent=2))
+        for spec in specs:
+            folder = root / spec.key
+            trials[trials.model == spec.key].to_csv(folder / "tuning.csv", index=False)
+            (folder / "selected.json").write_text(json.dumps(selected[spec.key], indent=2) + "\n")
     else:
-        saved_dir = Path(saved_dir)
-        weights = saved_dir / "weights"
-        metadata = weights / "manifest.json"
         if not metadata.is_file() or json.loads(metadata.read_text()) != manifest:
             raise ValueError("Saved Part 2 run differs from the dataset or settings. Use --retrain.")
-        copy_outputs(saved_dir / "intermediate", paths.intermediate, ["tuning.csv", "selected.json"])
-        trials = pd.read_csv(paths.intermediate / "tuning.csv")
-        selected = json.loads((paths.intermediate / "selected.json").read_text())
+        for spec in specs:
+            copy_outputs(source / spec.key, root / spec.key, ["tuning.csv", "selected.json"])
+        trials = pd.concat([pd.read_csv(root / s.key / "tuning.csv") for s in specs], ignore_index=True)
+        selected = {s.key: json.loads((root / s.key / "selected.json").read_text()) for s in specs}
         print(f"Evaluating saved weights on {len(test_window.users)} test users.", flush=True)
 
     runs = final_runs(specs, selected, test_window, user_ids, catalogue, setup,
-                      weights_dir=weights, restore=saved_dir is not None)
+                      results_dir=source, restore=saved_dir is not None)
+    for spec in specs:
+        rows = [{"seed": r["seed"] if not spec.deterministic else "deterministic",
+                 "users": len(r["users"]), **{f"{m}@10": r["per_user"][m].mean() for m in METRICS},
+                 "coverage": r["coverage"]} for r in runs[spec.key]]
+        pd.DataFrame(rows).to_csv(root / spec.key / "test.csv", index=False)
     table = overall(specs, selected, runs, setup)
     table.to_csv(paths.intermediate / "overall.csv", index=False)
     pairwise_tests(specs, runs, setup).to_csv(paths.intermediate / "pairwise.csv", index=False)
     pd.DataFrame({s.key: seed_mean(runs[s.key], "ndcg") for s in specs}).to_csv(
         paths.intermediate / "per-user-ndcg.csv")
     disagg, thresholds = disaggregate(specs, runs, test_window, user_ids, catalogue, setup)
-    disagg.to_csv(paths.intermediate / "disaggregated.csv", index=False)
+    for spec in specs:
+        disagg[disagg.model == spec.key].to_csv(root / spec.key / "disaggregated.csv", index=False)
     (paths.intermediate / "subgroups.json").write_text(json.dumps(thresholds, indent=2))
 
     abl = None
     if ablation and saved_dir is not None:
-        copy_outputs(saved_dir / "intermediate", paths.intermediate,
-                     ["ablation.csv", "ablation-tau.csv", "ablation-info.csv"])
-        abl = pd.read_csv(paths.intermediate / "ablation.csv")
+        for spec in specs:
+            copy_outputs(source / spec.key, root / spec.key, ["ablation.csv"])
+        abl = pd.concat([pd.read_csv(root / s.key / "ablation.csv") for s in specs], ignore_index=True)
+        copy_outputs(source / "part2/intermediate", paths.intermediate,
+                     ["ablation-tau.csv", "ablation-info.csv"])
     elif ablation:
         abl, taus, info = sparsity_ablation(specs, selected, runs, test_window, user_ids,
                                             catalogue, setup)
-        abl.to_csv(paths.intermediate / "ablation.csv", index=False)
+        for spec in specs:
+            abl[abl.model == spec.key].to_csv(root / spec.key / "ablation.csv", index=False)
         taus.to_csv(paths.intermediate / "ablation-tau.csv", index=False)
         info.to_csv(paths.intermediate / "ablation-info.csv", index=False)
 
-    export_results(table, trials, budget, paths.root / "results-part2.csv")
-    plot_all(specs, runs, disagg, abl, paths.images)
+    export_results(table, trials, paths.root / "results-part2.csv")
+    plot_all(specs, runs, disagg, abl, paths.images, root / "bpr")
     if saved_dir is None:
-        (weights / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        metadata.write_text(json.dumps(manifest, indent=2) + "\n")
     minutes = (time.perf_counter() - started) / 60
     cols = ["model"] + [f"{m}@10" for m in METRICS] + ["coverage"]
     with pd.option_context("display.width", 200, "display.precision", 4):
@@ -172,13 +178,13 @@ HEADERS = ["Model", "Variant / settings", "Similarity", "k", "Precision@10", "Re
            "NDCG@10", "Catalogue coverage", "Seed", "Notes"]
 
 
-def export_results(table, trials, budget, destination):
+def export_results(table, trials, destination):
     """Test rows in the same ten columns as the Part 1 results.csv / workbook."""
     rows = []
     for r in table.to_dict("records"):
         settings = json.loads(r["settings"])
         tried = int((trials.model == r["model"]).sum())
-        notes = [f"Selected on validation NDCG@10 among {tried} settings (budget {budget})",
+        notes = [f"Selected on validation NDCG@10 among {tried} settings",
                  f"test users {r['users']}"]
         for m, label in (("ndcg", "NDCG@10"), ("recall", "Recall@10")):
             if r["seeds"] != "deterministic":
@@ -206,7 +212,7 @@ def export_results(table, trials, budget, destination):
         writer.writerows(rows)
 
 
-def plot_all(specs, runs, disagg, abl, images):
+def plot_all(specs, runs, disagg, abl, images, bpr_dir):
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "recsys-matplotlib"))
     import matplotlib
     matplotlib.use("Agg")
@@ -216,9 +222,9 @@ def plot_all(specs, runs, disagg, abl, images):
                          "axes.spines.right": False})
     labels = {s.key: s.label.replace(" (own implementation)", " (own)") for s in specs}
 
-    def save(fig, name):
+    def save(fig, name, folder=images):
         for ext in ("png", "svg"):
-            fig.savefig(images / f"{name}.{ext}", dpi=300, bbox_inches="tight",
+            fig.savefig(folder / f"{name}.{ext}", dpi=300, bbox_inches="tight",
                         facecolor="white")
         plt.close(fig)
 
@@ -269,7 +275,7 @@ def plot_all(specs, runs, disagg, abl, images):
         ax.set_ylabel(r"Mean BPR loss $-\ln\sigma(x_{uij})$")
         ax.grid(alpha=.25)
         ax.legend(frameon=False, fontsize=6)
-        save(fig, "bpr-loss")
+        save(fig, "loss", bpr_dir)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+{
+  "ratings_sha256": "fc8abd2acf4ff37380414a52a4bfaf06e227313fa36037656a753063039c28fd",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "trials_per_model": {
+    "mostpop": 60,
+    "itemknn": 60,
+    "bpr": 60,
+    "markov": 3,
+    "multvae": 60
+  },
+  "ablation": true
+}

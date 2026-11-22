@@ -1,0 +1,11 @@
+{
+  "hidden_dim": 800,
+  "latent_dim": 64,
+  "dropout": 0.7,
+  "beta_cap": 1.0,
+  "lr": 0.0003,
+  "weight_decay": 0.0,
+  "batch_size": 256,
+  "feedback": "positives",
+  "epochs": 27
+}

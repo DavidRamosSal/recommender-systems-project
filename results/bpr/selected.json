@@ -1,0 +1,7 @@
+{
+  "feedback": "positives",
+  "factors": 128,
+  "lr": 0.025,
+  "reg": 0.005,
+  "epochs": 40
+}

@@ -8,8 +8,8 @@ from .outputs import OutputPaths
 from .splitting import temporal_split_by_date, to_epoch
 
 
-def save_figure(figure, output_dir, name):
-    images = OutputPaths(output_dir).create().images
+def save_figure(figure, images, name):
+    images.mkdir(parents=True, exist_ok=True)
     for extension in ("png", "svg"):
         figure.savefig(images / f"{name}.{extension}", dpi=300,
                        bbox_inches="tight", pad_inches=.07, facecolor="white")
@@ -109,7 +109,8 @@ def characterize_data(dataset, output_dir):
                 "split": split, "days": days, "ratings": len(window),
                 "positive_ratings": int((window.rating >= 4).sum()),
             })
-    pd.DataFrame(window_counts).to_csv(tables / "popularity-window-counts.csv", index=False)
+    (paths.root / "mostpop").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(window_counts).to_csv(paths.root / "mostpop/window-counts.csv", index=False)
     plot_data(rating_counts, timestamps, per_user, per_item, paths.root)
     return summary
 
@@ -135,7 +136,7 @@ def plot_data(rating_counts, timestamps, per_user, per_item, output_dir):
     axes[1].xaxis.set_major_locator(locator)
     axes[1].xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
     axes[1].set(title="Monthly rating activity", xlabel="Rating date (UTC)", ylabel="Count")
-    save_figure(fig, output_dir, "rating-activity")
+    save_figure(fig, OutputPaths(output_dir).images, "rating-activity")
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 8), layout="constrained")
@@ -170,7 +171,7 @@ def plot_data(rating_counts, timestamps, per_user, per_item, output_dir):
         for axis in (hist, ecdf_axis):
             axis.set_xlim(0, maximum)
             axis.grid(axis="y", alpha=.18)
-    save_figure(fig, output_dir, "long-tail")
+    save_figure(fig, OutputPaths(output_dir).images, "long-tail")
     plt.close(fig)
 
 
@@ -188,5 +189,5 @@ def plot_tuning(grid, output_dir):
     axis.set(xscale="log", title="Item-kNN validation search", xlabel="Neighbourhood size k",
              ylabel="NDCG@10 (validation)")
     axis.legend(ncol=2, fontsize=8)
-    save_figure(fig, output_dir, "itemknn-tuning")
+    save_figure(fig, OutputPaths(output_dir).root / "itemknn", "part1-tuning")
     plt.close(fig)

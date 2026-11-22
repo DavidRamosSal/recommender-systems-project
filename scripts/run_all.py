@@ -31,8 +31,8 @@ from run_part2 import run_part2
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = ROOT / "data/ml-1m"
 DATA_FILES = ("ratings.dat", "movies.dat", "users.dat")
-MARKOV_TABLES = ("order-tuning", "itemknn-tuning", "most-popular-tuning",
-                 "disaggregated-test", "paired-test", "sparsity-ablation")
+MARKOV_TABLES = ("markov/order-tuning.csv", "itemknn/part1-tuning.csv", "mostpop/window-tuning.csv",
+                 "markov/disaggregated-test.csv", "markov/paired-test.csv", "markov/sparsity-ablation.csv")
 
 
 def ensure_data(data_dir):
@@ -68,24 +68,24 @@ def main():
     dataset = load_movielens(data_dir)
     grid = None
     if 1 in args.parts:
-        saved = paths.root if (paths.root / "weights").is_dir() else ROOT / "results"
+        saved = paths.root if (paths.root / "intermediate/ratings.sha256").is_file() else ROOT / "results"
         grid = run_part1(dataset, data_dir, paths, saved_dir=None if args.retrain else saved)
     if 2 in args.parts:
-        saved = paths.root if (paths.root / "part2/weights").is_dir() else ROOT / "results"
-        run_part2(data_dir, paths.root / "part2", dataset=dataset,
-                  saved_dir=None if args.retrain else saved / "part2")
+        saved = paths.root if (paths.root / "part2/manifest.json").is_file() else ROOT / "results"
+        run_part2(data_dir, paths.root, dataset=dataset, saved_dir=None if args.retrain else saved)
         if args.retrain:
-            run_comparison(dataset.ratings, out_dir=paths.root / "markov", item_knn_grid=grid)
+            run_comparison(dataset.ratings, out_dir=paths.root, item_knn_grid=grid)
         else:
-            copy_outputs(saved / "markov", paths.root / "markov", [f"{t}.csv" for t in MARKOV_TABLES])
+            copy_outputs(saved, paths.root, MARKOV_TABLES)
 
 
 def run_part1(dataset, data_dir, paths, saved_dir=None):
     output_dir = paths.root
     print("Loading MovieLens and regenerating data characterization...", flush=True)
     ratings = dataset.ratings
-    weights_dir = (saved_dir or output_dir) / "weights"
-    marker = weights_dir / "ratings.sha256"
+    knn_dir = output_dir / "itemknn"
+    knn_dir.mkdir(parents=True, exist_ok=True)
+    marker = (saved_dir or output_dir) / "intermediate/ratings.sha256"
     digest = ratings_digest(ratings)
     if saved_dir is None:
         marker.unlink(missing_ok=True)
@@ -94,20 +94,20 @@ def run_part1(dataset, data_dir, paths, saved_dir=None):
         train, validation, _ = temporal_split_by_date(ratings, "2001-01-01", "2001-07-01")
         print("Searching all 60 item-kNN settings on validation only...", flush=True)
         grid = tune_itemknn(train, validation, user_ids, catalogue)
-        grid.to_csv(paths.intermediate / "itemknn-tuning.csv", index=False)
+        grid.to_csv(knn_dir / "part1-tuning.csv", index=False)
     else:
         if not marker.is_file() or marker.read_text().strip() != digest:
             raise ValueError("Part 1 checkpoints require matching ratings. Run with --retrain.")
-        copy_outputs(saved_dir / "intermediate", paths.intermediate, ["itemknn-tuning.csv"])
-        grid = pd.read_csv(paths.intermediate / "itemknn-tuning.csv")
+        copy_outputs(saved_dir / "itemknn", knn_dir, ["part1-tuning.csv"])
+        grid = pd.read_csv(knn_dir / "part1-tuning.csv")
     characterize_data(dataset, output_dir)
     best_by_profile = grid.loc[grid.groupby(["similarity", "feedback"], sort=False)["ndcg@10"].idxmax()]
-    best_by_profile.to_csv(paths.intermediate / "itemknn-best-settings.csv", index=False)
+    best_by_profile.to_csv(knn_dir / "part1-best-settings.csv", index=False)
     settings = selected_settings(grid)
     plot_tuning(grid, output_dir)
     print(f"Selected {settings}; evaluating all nine baselines...", flush=True)
     run_baselines(data_dir, output_dir, plots=True, dataset=dataset, settings=settings,
-                  weights_dir=weights_dir, restore=saved_dir is not None)
+                  saved_dir=saved_dir)
     if saved_dir is None:
         marker.write_text(digest + "\n")
 
