@@ -48,7 +48,7 @@ data. BPR and Mult-VAE save one final checkpoint per seed (0–4). The two
 baseline folders also contain their Part 1 validation and test fits. Both
 parts use the same item-kNN checkpoint when they select the same settings.
 Each NumPy checkpoint stores the fitted parameters and MovieLens IDs needed
-for scoring. Mult-VAE weights can be loaded on CPU, CUDA or Apple MPS.
+for scoring. Mult-VAE trains and scores on CPU.
 
 ### Part 2
 
@@ -59,7 +59,7 @@ below. Mult-VAE uses the notebook's reference configuration and 59 distinct
 random configurations. Each
 trial trains for up to 100 epochs, stopping after 10 epochs without improvement
 in validation NDCG@10. The final fits use the winning trial's best epoch.
-PyTorch uses CUDA or Apple MPS when available and runs on CPU otherwise.
+The CPU run matches the validation split and device used in the Mult-VAE notebook.
 
 The pipeline refits on train + validation, using seeds 0–4 for BPR and Mult-VAE.
 It reports user-bootstrap and seed intervals, paired Wilcoxon tests across
@@ -94,29 +94,21 @@ The [project report](report/Recommender_Systems_Report.pdf) ([Word version](repo
 
 ### Mult-VAE notebook and pipeline
 
-The [original notebook](notebooks/part-2multvae.ipynb) and the pipeline use the
-same temporal split, 60 ordered validation configurations, and five final seeds.
-Both select the same trial configuration. Replaying that configuration on CPU
-reproduced the notebook's selection at epoch 21 (validation NDCG@10 0.1788).
-Apple MPS reproduced the pipeline selection at epoch 27 (0.1785). The report
-and results workbook use the pipeline checkpoints. Figure 4 is generated from
-its tuning table and [winning validation curve](results/multvae/validation-curve.csv).
-
-The uploaded PyTorch checkpoints can be scored alongside the pipeline
-checkpoints with the same ranking code, candidate set, and 777 test users.
+The [original notebook](notebooks/part-2multvae.ipynb) supplies the 60 CPU
+validation trials and the five final Mult-VAE checkpoints (seeds 0–4). The
+winning configuration reached validation NDCG@10 of 0.1788 at epoch 21. The
+pipeline stores those weights in its NumPy checkpoint format and uses the
+[winning validation curve](results/multvae/validation-curve.csv) in Figure 4.
+On the 777 test users, the notebook and pipeline checkpoints both reach
+NDCG@10 of 0.2067 and catalogue coverage of 16.5%. To verify the scores:
 
 ```bash
 uv run --locked scripts/compare_multvae_notebook.py --data-dir data/ml-1m
 ```
 
-| Checkpoints | Test NDCG@10 | Catalogue coverage |
-| --- | ---: | ---: |
-| Notebook (epoch 21) | 0.2067 | 16.5% |
-| Pipeline (epoch 27) | 0.2063 | 17.5% |
-
-The notebook's sparsity cache uses three runs per fraction. The report uses
-the pipeline's five shared subsamples so each of the five models is evaluated
-on the same data draws.
+The shared pipeline uses 1,000 bootstrap draws for all models. It also refits
+Mult-VAE on CPU for the five shared sparsity subsamples at each reduced
+fraction. The notebook's three-draw ablation is an earlier comparison.
 
 ## Markov comparison
 

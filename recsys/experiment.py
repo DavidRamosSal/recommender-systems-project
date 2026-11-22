@@ -193,8 +193,9 @@ def final_runs(specs, selected, test: Window, user_ids, catalogue, setup: Setup,
             r = run(spec, selected[spec.key], seed, test, user_ids, catalogue,
                     checkpoint=checkpoint, restore=restore)
             runs[spec.key].append(r)
+            timing = f" ({r['fit_seconds']:.0f}s)" if np.isfinite(r["fit_seconds"]) else ""
             setup.progress(f"[{tag} {spec.key} seed {seed}] NDCG@10 "
-                           f"{r['per_user']['ndcg'].mean():.4f} ({r['fit_seconds']:.0f}s)",
+                           f"{r['per_user']['ndcg'].mean():.4f}{timing}",
                            flush=True)
     return runs
 

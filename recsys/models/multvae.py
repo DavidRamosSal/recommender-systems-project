@@ -12,12 +12,6 @@ from torch.nn import functional as F
 from .item_knn import interaction_matrix
 
 
-def _device():
-    if torch.cuda.is_available():
-        return "cuda"
-    return "mps" if torch.backends.mps.is_available() else "cpu"
-
-
 class _Network(nn.Module):
     def __init__(self, n_items, hidden_dim, latent_dim, dropout):
         super().__init__()
@@ -64,15 +58,13 @@ class MultVAE:
         self.items = pd.Index(np.sort(history.item_id.unique()) if catalogue is None else catalogue)
         profiles = interaction_matrix(history, self.users, self.items,
                                       positives_only=self.feedback == "positives")
-        device = _device()
-        self.profiles = torch.from_numpy(profiles).to(device)
-        training = self.profiles[torch.from_numpy(np.flatnonzero(profiles.any(axis=1))).to(device)]
+        self.profiles = torch.from_numpy(profiles)
+        training = self.profiles[torch.from_numpy(np.flatnonzero(profiles.any(axis=1)))]
         if not len(training):
             raise ValueError("Mult-VAE needs at least one nonempty training profile.")
 
         torch.manual_seed(self.seed)
-        self.network = _Network(len(self.items), self.hidden_dim, self.latent_dim,
-                                self.dropout).to(device)
+        self.network = _Network(len(self.items), self.hidden_dim, self.latent_dim, self.dropout)
         optimizer = torch.optim.Adam(self.network.parameters(), lr=self.lr,
                                      weight_decay=self.weight_decay)
         shuffler = torch.Generator().manual_seed(self.seed)
@@ -84,7 +76,7 @@ class MultVAE:
         self.validation_ndcg = []
         for epoch in range(1, self.epochs + 1):
             self.network.train()
-            perm = torch.randperm(len(training), generator=shuffler).to(device)
+            perm = torch.randperm(len(training), generator=shuffler)
             for batch in perm.split(self.batch_size):
                 x = training[batch]
                 logits, mu, logvar = self.network(x)
@@ -113,7 +105,7 @@ class MultVAE:
         if (rows < 0).any():
             raise ValueError("Unknown user ID. Include all evaluation users in user_ids at fit.")
         self.network.eval()
-        rows = torch.from_numpy(rows).to(self.profiles.device)
+        rows = torch.from_numpy(rows)
         scores = torch.cat([self.network(self.profiles[batch])[0] for batch in rows.split(1024)])
         scores = scores.cpu().numpy()
         if item_ids is None:
@@ -134,10 +126,8 @@ class MultVAE:
 
     def load_weights(self, weights):
         self.users, self.items = pd.Index(weights["users"]), pd.Index(weights["items"])
-        device = _device()
-        self.profiles = torch.from_numpy(weights["profiles"]).to(device, dtype=torch.float32)
-        self.network = _Network(len(self.items), self.hidden_dim, self.latent_dim,
-                                self.dropout).to(device)
+        self.profiles = torch.from_numpy(weights["profiles"]).to(dtype=torch.float32)
+        self.network = _Network(len(self.items), self.hidden_dim, self.latent_dim, self.dropout)
         self.network.load_state_dict({k: torch.from_numpy(weights[k])
                                       for k in self.network.state_dict()})
         self.network.eval()
