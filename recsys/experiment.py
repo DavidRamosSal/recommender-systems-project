@@ -140,6 +140,7 @@ def run(spec: ModelSpec, params: dict, seed: int, window: Window, user_ids, cata
         "fit_seconds": fit_seconds,
         "params": {**params, "epochs": model.best_epoch} if hasattr(model, "best_epoch") else params,
         "loss_history": list(getattr(model, "loss_history", []) or []),
+        "validation_ndcg": getattr(model, "validation_ndcg", ()),
     }
 
 
@@ -156,7 +157,7 @@ def seed_mean(runs, metric) -> pd.Series:
 
 # ----------------------------------------------------------------- 1. tuning
 def tune(specs, validation: Window, user_ids, catalogue, setup: Setup):
-    trials, selected = [], {}
+    trials, selected, validation_curves = [], {}, {}
     for spec in specs:
         best = -np.inf
         for n, params in enumerate(spec.configs, 1):
@@ -168,9 +169,11 @@ def tune(specs, validation: Window, user_ids, catalogue, setup: Setup):
             trials.append(row)
             if row["ndcg@10"] > best:        # first maximum wins, as in Part 1
                 best, selected[spec.key] = row["ndcg@10"], r["params"]
+                if r["validation_ndcg"]:
+                    validation_curves[spec.key] = r["validation_ndcg"]
             setup.progress(f"[tune {spec.key} {n}/{len(spec.configs)}] {params} "
                            f"NDCG@10 {row['ndcg@10']:.4f}", flush=True)
-    return pd.DataFrame(trials), selected
+    return pd.DataFrame(trials), selected, validation_curves
 
 
 # ----------------------------------------------------------------- 2. final

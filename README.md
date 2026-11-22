@@ -92,6 +92,32 @@ to change the output directory.
 
 The [project report](report/Recommender_Systems_Report.pdf) ([Word version](report/Recommender_Systems_Report.docx)) and [results spreadsheet](results/Recommender_Systems_Results.xlsm) are included in this repository.
 
+### Mult-VAE notebook and pipeline
+
+The [original notebook](notebooks/part-2multvae.ipynb) and the pipeline use the
+same temporal split, 60 ordered validation configurations, and five final seeds.
+Both select the same trial configuration. Replaying that configuration on CPU
+reproduced the notebook's selection at epoch 21 (validation NDCG@10 0.1788).
+Apple MPS reproduced the pipeline selection at epoch 27 (0.1785). The report
+and results workbook use the pipeline checkpoints. Figure 4 is generated from
+its tuning table and [winning validation curve](results/multvae/validation-curve.csv).
+
+The uploaded PyTorch checkpoints can be scored alongside the pipeline
+checkpoints with the same ranking code, candidate set, and 777 test users.
+
+```bash
+uv run --locked scripts/compare_multvae_notebook.py --data-dir data/ml-1m
+```
+
+| Checkpoints | Test NDCG@10 | Catalogue coverage |
+| --- | ---: | ---: |
+| Notebook (epoch 21) | 0.2067 | 16.5% |
+| Pipeline (epoch 27) | 0.2063 | 17.5% |
+
+The notebook's sparsity cache uses three runs per fraction. The report uses
+the pipeline's five shared subsamples so each of the five models is evaluated
+on the same data draws.
+
 ## Markov comparison
 
 Tune Markov order and compare it with item-kNN and Most Popular on the Part 1

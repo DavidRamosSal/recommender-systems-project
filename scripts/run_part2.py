@@ -109,6 +109,8 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
     manifest = {"ratings_sha256": ratings_digest(ratings), "seeds": list(seeds),
                 "trials_per_model": {s.key: len(s.configs) for s in specs}, "ablation": ablation}
     metadata = source / "part2/manifest.json"
+    curve_path = Path("multvae/validation-curve.csv")
+    vae_curve = None
     if saved_dir is None:
         if any(s.key in ("mostpop", "itemknn") for s in specs):
             invalidate_mismatched_runs(root, manifest["ratings_sha256"])
@@ -116,11 +118,14 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
         val_window = make_window(train, validation, user_ids, catalogue)
         print(f"Part 2: {len(specs)} models, budget {budget}, seeds {list(seeds)}; "
               f"{len(val_window.users)} validation / {len(test_window.users)} test users", flush=True)
-        trials, selected = tune(specs, val_window, user_ids, catalogue, setup)
+        trials, selected, validation_curves = tune(specs, val_window, user_ids, catalogue, setup)
         for spec in specs:
             folder = root / spec.key
             trials[trials.model == spec.key].to_csv(folder / "tuning.csv", index=False)
             (folder / "selected.json").write_text(json.dumps(selected[spec.key], indent=2) + "\n")
+        if scores := validation_curves.get("multvae"):
+            vae_curve = pd.DataFrame({"epoch": range(1, len(scores) + 1), "ndcg@10": scores})
+            vae_curve.to_csv(root / curve_path, index=False)
     else:
         if not metadata.is_file() or json.loads(metadata.read_text()) != manifest:
             raise ValueError("Saved Part 2 run differs from the dataset or settings. Use --retrain.")
@@ -128,6 +133,9 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
             copy_outputs(source / spec.key, root / spec.key, ["tuning.csv", "selected.json"])
         trials = pd.concat([pd.read_csv(root / s.key / "tuning.csv") for s in specs], ignore_index=True)
         selected = {s.key: json.loads((root / s.key / "selected.json").read_text()) for s in specs}
+        if "multvae" in selected and (source / curve_path).is_file():
+            copy_outputs(source, root, [curve_path])
+            vae_curve = pd.read_csv(root / curve_path)
         print(f"Evaluating saved weights on {len(test_window.users)} test users.", flush=True)
 
     runs = final_runs(specs, selected, test_window, user_ids, catalogue, setup,
@@ -164,7 +172,7 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
 
     rows = export_results(table, trials, paths.root / "results-part2.csv", setup)
     update_overall_results(root, rows, part=2, partial=models is not None)
-    plot_all(specs, runs, disagg, abl, paths.images, root / "bpr")
+    plot_all(specs, runs, disagg, abl, paths.images, root / "bpr", trials, vae_curve)
     if saved_dir is None:
         metadata.write_text(json.dumps(manifest, indent=2) + "\n")
     minutes = (time.perf_counter() - started) / 60
@@ -232,7 +240,7 @@ def export_results(table, trials, destination, setup):
     return cumulative_rows
 
 
-def plot_all(specs, runs, disagg, abl, images, bpr_dir):
+def plot_all(specs, runs, disagg, abl, images, bpr_dir, trials, vae_curve):
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "recsys-matplotlib"))
     import matplotlib
     matplotlib.use("Agg")
@@ -300,6 +308,41 @@ def plot_all(specs, runs, disagg, abl, images, bpr_dir):
                fontsize=7, bbox_to_anchor=(.5, 1.06))
     fig.tight_layout()
     save(fig, "disaggregation")
+
+    if "multvae" in runs:
+        with plt.rc_context():
+            plt.rcdefaults()
+            plt.rcParams.update({"font.size": 8, "axes.spines.top": False,
+                                 "axes.spines.right": False})
+            vae_trials = trials.loc[trials.model == "multvae"].sort_values(
+                "ndcg@10", ascending=False, kind="stable")
+            winner = vae_trials.iloc[0]
+            best_epoch = json.loads(winner["params"])["epochs"]
+            selected_score = winner["ndcg@10"]
+
+            panels = 2 if vae_curve is not None else 1
+            fig, axs = plt.subplots(1, panels, figsize=(6.9, 2.2))
+            ax = np.atleast_1d(axs)[0]
+            ax.bar(range(1, len(vae_trials) + 1), vae_trials["ndcg@10"], color="#3182bd")
+            ax.set(xlabel="Trial (sorted by score)", ylabel="Validation NDCG@10",
+                   title="Mult-VAE validation search")
+            ax.grid(axis="y", alpha=.2)
+
+            if vae_curve is not None:
+                peak = vae_curve.loc[vae_curve["ndcg@10"].idxmax()]
+                if peak["epoch"] != best_epoch or not np.isclose(
+                        peak["ndcg@10"], selected_score, rtol=1e-10, atol=1e-12):
+                    raise ValueError("Mult-VAE validation curve does not match the winning trial.")
+                ax = axs[1]
+                ax.plot(vae_curve["epoch"], vae_curve["ndcg@10"], color="#3182bd", marker=".", lw=1.5)
+                ax.axvline(best_epoch, color="#183153", ls=":", label=f"Selected epoch ({best_epoch})")
+                ax.set(xlabel="Epoch", ylabel="Validation NDCG@10",
+                       title=f"Best trial ({winner['trial']}) by epoch")
+                ax.grid(axis="y", alpha=.2)
+                ax.legend(facecolor="white", edgecolor="none", framealpha=1,
+                          loc="lower right", fontsize=7)
+            fig.tight_layout(pad=.7)
+            save(fig, "multvae-validation")
 
     if "bpr" in runs:
         fig, ax = plt.subplots(figsize=(3.6, 2.4))

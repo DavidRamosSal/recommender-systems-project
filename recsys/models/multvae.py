@@ -81,6 +81,7 @@ class MultVAE:
         best_ndcg = -np.inf
         best_state = None
         self.best_epoch = self.epochs
+        self.validation_ndcg = []
         for epoch in range(1, self.epochs + 1):
             self.network.train()
             perm = torch.randperm(len(training), generator=shuffler).to(device)
@@ -96,6 +97,7 @@ class MultVAE:
                 step += 1
             if validation is not None:
                 ndcg = validation(self)
+                self.validation_ndcg.append(float(ndcg))
                 if ndcg > best_ndcg:
                     best_ndcg, self.best_epoch = ndcg, epoch
                     best_state = deepcopy(self.network.state_dict())
