@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from recsys.checkpoints import prepare_model
 from recsys.data import load_movielens
 from recsys.evaluation import (
     bootstrap_ci, evaluate, evaluation_users, per_user_ndcg, ranking_metrics,
@@ -53,7 +54,7 @@ MOST_POPULAR_VARIANTS = {
 }
 
 
-def most_popular_results(train, validation, test, catalogue):
+def most_popular_results(train, validation, test, catalogue, *, weights_dir=None, restore=False):
     """Evaluate all eight popularity variants with reproducible user-bootstrap CIs."""
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     models = [MostPopular("all", "all"), MostPopular("all", "positive")]
@@ -65,7 +66,10 @@ def most_popular_results(train, validation, test, catalogue):
             ("validation", train, validation),
             ("test", pd.concat([train, validation]), test),
         ):
-            model.fit(history)
+            params = {"window": model.window, "feedback": model.feedback, "recent_days": model.recent_days}
+            checkpoint = weights_dir / f"{model.name}-{split}.npz" if weights_dir else None
+            model, _ = prepare_model(model, lambda: model.fit(history), params,
+                                     checkpoint=checkpoint, restore=restore)
             labels = window[window["rating"] >= 4]
             labels = labels[labels["user_id"].isin(history["user_id"])][["user_id", "item_id"]]
             predictions = top_k(model, labels["user_id"].unique(), catalogue, history, k=10)
@@ -79,7 +83,8 @@ def most_popular_results(train, validation, test, catalogue):
     return pd.DataFrame(rows)
 
 
-def itemknn_results(train, validation, test, user_ids, catalogue, settings=None):
+def itemknn_results(train, validation, test, user_ids, catalogue, settings=None, *,
+                    weights_dir=None, restore=False):
     """Evaluate selected settings; the default is the report's cosine/positive/k=500."""
     rows = []
     for split, history, window in (
@@ -90,9 +95,11 @@ def itemknn_results(train, validation, test, user_ids, catalogue, settings=None)
         indices = pd.Index(user_ids).get_indexer(users)
         relevant = interaction_matrix(window, user_ids, catalogue)[indices]
         seen = interaction_matrix(history, user_ids, catalogue, positives_only=False)[indices]
-        model = ItemKNN(**(settings or {})).fit(
-            history, user_ids=user_ids, catalogue=catalogue,
-        )
+        model = ItemKNN(**(settings or {}))
+        checkpoint = weights_dir / f"itemknn-{split}.npz" if weights_dir else None
+        params = {"similarity": model.similarity, "feedback": model.feedback, "k": model.k}
+        model, _ = prepare_model(model, lambda: model.fit(history, user_ids=user_ids, catalogue=catalogue),
+                                 params, checkpoint=checkpoint, restore=restore)
         top = top_k_items(model.score_users(users), seen)
         metrics = ranking_metrics(top, relevant)
         rows.append({
@@ -239,7 +246,7 @@ def plot_results(results, output_dir, settings=None):
 
 def run_baselines(
     data_dir=ROOT / "data/ml-1m", output_dir=ROOT / "results", *,
-    plots=False, dataset=None, settings=None,
+    plots=False, dataset=None, settings=None, weights_dir=None, restore=False,
 ):
     """Compute and export baselines; run_all can supply freshly tuned settings."""
     dataset = load_movielens(data_dir) if dataset is None else dataset
@@ -248,7 +255,8 @@ def run_baselines(
     user_ids = np.sort(ratings["user_id"].unique())
     catalogue = np.sort(ratings["item_id"].unique())
     train, validation, test = temporal_split_by_date(ratings, "2001-01-01", "2001-07-01")
-    popular = most_popular_results(train, validation, test, catalogue)
+    popular = most_popular_results(train, validation, test, catalogue,
+                                   weights_dir=weights_dir, restore=restore)
     columns = ["model", "split", "users", "precision@10", "recall@10", "ndcg@10", "catalogue_coverage"]
     validation_rows = popular[popular.split == "validation"]
     selected = validation_rows.loc[validation_rows["ndcg@10"].idxmax(), "model"]
@@ -256,7 +264,8 @@ def run_baselines(
     if len(comparisons) == 1:
         comparisons.append("mostpop_recent30d_pos4")
     comparison = pd.concat([
-        itemknn_results(train, validation, test, user_ids, catalogue, settings),
+        itemknn_results(train, validation, test, user_ids, catalogue, settings,
+                        weights_dir=weights_dir, restore=restore),
         popular[popular.model.isin(comparisons)][columns],
     ], ignore_index=True)
 

@@ -12,6 +12,12 @@ from torch.nn import functional as F
 from .item_knn import interaction_matrix
 
 
+def _device():
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
 class _Network(nn.Module):
     def __init__(self, n_items, hidden_dim, latent_dim, dropout):
         super().__init__()
@@ -58,11 +64,7 @@ class MultVAE:
         self.items = pd.Index(np.sort(history.item_id.unique()) if catalogue is None else catalogue)
         profiles = interaction_matrix(history, self.users, self.items,
                                       positives_only=self.feedback == "positives")
-        device = "cpu"
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif torch.backends.mps.is_available():
-            device = "mps"
+        device = _device()
         self.profiles = torch.from_numpy(profiles).to(device)
         training = self.profiles[torch.from_numpy(np.flatnonzero(profiles.any(axis=1))).to(device)]
         if not len(training):
@@ -122,6 +124,21 @@ class MultVAE:
 
     def score(self, user_id, item_ids):
         return self.score_users([user_id], item_ids)[0].astype(np.float64)
+
+    def weights(self):
+        return {"users": self.users.to_numpy(), "items": self.items.to_numpy(),
+                "profiles": self.profiles.cpu().numpy().astype(bool),
+                **{name: tensor.cpu().numpy() for name, tensor in self.network.state_dict().items()}}
+
+    def load_weights(self, weights):
+        self.users, self.items = pd.Index(weights["users"]), pd.Index(weights["items"])
+        device = _device()
+        self.profiles = torch.from_numpy(weights["profiles"]).to(device, dtype=torch.float32)
+        self.network = _Network(len(self.items), self.hidden_dim, self.latent_dim,
+                                self.dropout).to(device)
+        self.network.load_state_dict({k: torch.from_numpy(weights[k])
+                                      for k in self.network.state_dict()})
+        self.network.eval()
 
 
 def validation_configs(budget, seed=42):

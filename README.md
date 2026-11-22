@@ -4,17 +4,37 @@ Requires uv and Python 3.12. If uv is not installed, follow the
 [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/).
 Run commands from the repository root.
 
-Reproduce every number, table and generated figure in the report (Parts 1 and 2):
+Evaluate the saved MovieLens models and regenerate the result tables and figures.
 
 ```bash
 uv run --locked scripts/run_all.py --data-dir data/ml-1m
 ```
 
-This installs the dependencies pinned in `uv.lock`, downloads MovieLens 1M if the
-default dataset is missing, and generates the data analysis, 60-setting validation
-search, all nine baseline results, and figures (Part 1), followed by the Part 2
-experiments and the Markov comparison below. Add `--parts 1` or `--parts 2`
-to run one part.
+This installs the dependencies pinned in `uv.lock` and downloads MovieLens 1M if
+the default dataset is missing. The default run loads the saved weights, scores
+the evaluation users again, and reuses the recorded validation searches, sparsity
+ablation and supplementary Markov tables. Add `--parts 1` or `--parts 2` to run
+one part.
+
+To rerun the validation searches, retrain the models and regenerate all experiments,
+including the ablations, use
+
+```bash
+uv run --locked scripts/run_all.py --retrain
+```
+
+`--retrain` writes weights and results under `--out-dir` (default `results/`).
+A fresh output directory uses the repository's checkpoints for evaluation.
+An output directory containing its own checkpoints uses those. The runner checks
+the ratings against the saved training run. For a different dataset, pass
+`--retrain --data-dir /path/to/ml-1m --out-dir /path/to/new-results`.
+
+Part 1 stores a validation fit and a final test fit for each of its nine
+variants in `results/weights/`. Part 2 stores the five selected models in
+`results/part2/weights/`, with one final fit per deterministic model and one per
+seed (0–4) for BPR and Mult-VAE. Each compressed NumPy file contains the fitted
+parameters, original MovieLens IDs or histories, and settings needed for
+scoring. The Mult-VAE files can be loaded on CPU, CUDA or Apple MPS.
 
 ### Part 2
 

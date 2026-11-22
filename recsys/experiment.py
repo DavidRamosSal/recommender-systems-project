@@ -23,7 +23,6 @@ from __future__ import annotations
 import inspect
 import itertools
 import json
-import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -31,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from .evaluation import evaluation_users, ranking_metrics
+from .checkpoints import prepare_model
 from .models.item_knn import interaction_matrix
 from .ranking import top_k_items
 from .stats import bootstrap_interval, holm, kendall_tau, paired_comparison, seed_interval
@@ -126,11 +126,12 @@ def score_matrix(model, users, catalogue) -> np.ndarray:
 
 
 def run(spec: ModelSpec, params: dict, seed: int, window: Window, user_ids, catalogue,
-        *, tuning=False) -> dict:
+        *, tuning=False, checkpoint=None, restore=False) -> dict:
     model = spec.build(params, seed)
-    start = time.perf_counter()
-    model = fit_model(model, window.history, user_ids, catalogue, window if tuning else None)
-    fit_seconds = time.perf_counter() - start
+    model, fit_seconds = prepare_model(
+        model, lambda: fit_model(model, window.history, user_ids, catalogue, window if tuning else None),
+        params, seed=seed, checkpoint=checkpoint, restore=restore,
+    )
     top = top_k_items(score_matrix(model, window.users, catalogue), window.seen)
     return {
         "seed": seed, "top": top, "users": window.users,
@@ -173,12 +174,18 @@ def tune(specs, validation: Window, user_ids, catalogue, setup: Setup):
 
 
 # ----------------------------------------------------------------- 2. final
-def final_runs(specs, selected, test: Window, user_ids, catalogue, setup: Setup, tag="test"):
+def final_runs(specs, selected, test: Window, user_ids, catalogue, setup: Setup, tag="test",
+               *, weights_dir=None, restore=False):
     runs = {}
     for spec in specs:
         runs[spec.key] = []
         for seed in (setup.seeds[:1] if spec.deterministic else setup.seeds):
-            r = run(spec, selected[spec.key], seed, test, user_ids, catalogue)
+            checkpoint = None
+            if weights_dir is not None:
+                filename = spec.key if spec.deterministic else f"{spec.key}-seed{seed}"
+                checkpoint = weights_dir / f"{filename}.npz"
+            r = run(spec, selected[spec.key], seed, test, user_ids, catalogue,
+                    checkpoint=checkpoint, restore=restore)
             runs[spec.key].append(r)
             setup.progress(f"[{tag} {spec.key} seed {seed}] NDCG@10 "
                            f"{r['per_user']['ndcg'].mean():.4f} ({r['fit_seconds']:.0f}s)",

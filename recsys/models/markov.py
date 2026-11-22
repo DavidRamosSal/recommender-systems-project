@@ -1,4 +1,5 @@
 from collections import Counter, defaultdict
+import json
 from operator import index
 
 import numpy as np
@@ -36,3 +37,18 @@ class MarkovChain:
         counts = self.transition_counts.get(state, Counter())
         scale = 1 / max(counts.total(), 1)
         return np.array([counts[movie] * scale for movie in item_ids], dtype=float)
+
+    def weights(self):
+        transitions = [(*state, item, count) for state, counts in self.transition_counts.items()
+                       for item, count in counts.items()]
+        # A user's last state can be shorter than the configured order.
+        histories = [[int(user), list(state)] for user, state in self.last_movies.items()]
+        return {"transitions": np.asarray(transitions, dtype=np.int64),
+                "histories": json.dumps(histories)}
+
+    def load_weights(self, weights):
+        self.transition_counts = defaultdict(Counter)
+        for *state, item, count in weights["transitions"].tolist():
+            self.transition_counts[tuple(state)][item] = count
+        self.last_movies = {user: tuple(state) for user, state in
+                            json.loads(weights["histories"].item())}

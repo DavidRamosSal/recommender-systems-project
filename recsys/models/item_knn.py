@@ -159,3 +159,12 @@ class ItemKNN:
     def score(self, user_id: int, item_ids: NDArray[np.int64]) -> NDArray[np.float64]:
         """Return scores in the requested original item-ID order."""
         return self.score_users([user_id], item_ids)[0].astype(np.float64)
+
+    def weights(self):
+        return {"users": self._users.to_numpy(), "items": self._items.to_numpy(),
+                "profiles": self._profiles.astype(bool), "neighbours": self._neighbours}
+
+    def load_weights(self, weights):
+        self._users, self._items = pd.Index(weights["users"]), pd.Index(weights["items"])
+        self._profiles = weights["profiles"].astype(np.float32)
+        self._neighbours = weights["neighbours"]

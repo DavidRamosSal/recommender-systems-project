@@ -79,6 +79,12 @@ class MostPopular:
             raise RuntimeError("Call fit() before score().")
         return self._scores.reindex(item_ids, fill_value=0.0).to_numpy()
 
+    def weights(self):
+        return {"items": self._scores.index.to_numpy(), "scores": self._scores.to_numpy()}
+
+    def load_weights(self, weights):
+        self._scores = pd.Series(weights["scores"], index=weights["items"])
+
 
 def variants(recent_days: int = 90, positive_threshold: int = 4) -> list[MostPopular]:
     """The four combinations of window x feedback."""

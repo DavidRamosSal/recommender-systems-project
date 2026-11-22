@@ -7,6 +7,7 @@ gets the same validation budget (BUDGET settings; smaller spaces are searched
 exhaustively). Seeds: models 0-4, BPR random search 2026, bootstrap 42.
 
 Outputs (default results/part2/):
+    weights/                     selected full-history model, one file per fit
     results-part2.csv            test results in the results-workbook columns
     intermediate/tuning.csv      every validation trial
     intermediate/selected.json   selected setting per model
@@ -32,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from recsys.data import load_movielens
+from recsys.checkpoints import ratings_digest
 from recsys.experiment import (
     METRICS, ModelSpec, Setup, disaggregate, final_runs, make_window, overall,
     pairwise_tests, search_space, seed_mean, sparsity_ablation, tune,
@@ -39,7 +41,7 @@ from recsys.experiment import (
 from recsys.models import BPR, ItemKNN, MarkovChain
 from recsys.models.most_popular import MostPopular, validation_configs as popularity_configs
 from recsys.models.multvae import MultVAE, validation_configs as multvae_configs
-from recsys.outputs import OutputPaths
+from recsys.outputs import OutputPaths, copy_outputs
 from recsys.splitting import temporal_split_by_date
 from recsys.tuning import FEEDBACKS, K_GRID, SIMILARITIES
 
@@ -93,7 +95,7 @@ def main():
 
 
 def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 3, 4),
-              ablation=True, dataset=None):
+              ablation=True, dataset=None, saved_dir=None):
     started = time.perf_counter()
     paths = OutputPaths(out_dir).create()
     setup = Setup(seeds=seeds)
@@ -105,16 +107,32 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
     history = pd.concat([train, validation])
 
     specs = [s for s in model_specs(budget) if models is None or s.key in models]
-    val_window = make_window(train, validation, user_ids, catalogue)
     test_window = make_window(history, test, user_ids, catalogue)
-    print(f"Part 2: {len(specs)} models, budget {budget}, seeds {list(seeds)}; "
-          f"{len(val_window.users)} validation / {len(test_window.users)} test users", flush=True)
+    weights = paths.root / "weights"
+    manifest = {"ratings_sha256": ratings_digest(ratings), "seeds": list(seeds),
+                "budget": budget, "models": [s.key for s in specs], "ablation": ablation}
+    if saved_dir is None:
+        weights.mkdir(parents=True, exist_ok=True)
+        (weights / "manifest.json").unlink(missing_ok=True)
+        val_window = make_window(train, validation, user_ids, catalogue)
+        print(f"Part 2: {len(specs)} models, budget {budget}, seeds {list(seeds)}; "
+              f"{len(val_window.users)} validation / {len(test_window.users)} test users", flush=True)
+        trials, selected = tune(specs, val_window, user_ids, catalogue, setup)
+        trials.to_csv(paths.intermediate / "tuning.csv", index=False)
+        (paths.intermediate / "selected.json").write_text(json.dumps(selected, indent=2))
+    else:
+        saved_dir = Path(saved_dir)
+        weights = saved_dir / "weights"
+        metadata = weights / "manifest.json"
+        if not metadata.is_file() or json.loads(metadata.read_text()) != manifest:
+            raise ValueError("Saved Part 2 run differs from the dataset or settings. Use --retrain.")
+        copy_outputs(saved_dir / "intermediate", paths.intermediate, ["tuning.csv", "selected.json"])
+        trials = pd.read_csv(paths.intermediate / "tuning.csv")
+        selected = json.loads((paths.intermediate / "selected.json").read_text())
+        print(f"Evaluating saved weights on {len(test_window.users)} test users.", flush=True)
 
-    trials, selected = tune(specs, val_window, user_ids, catalogue, setup)
-    trials.to_csv(paths.intermediate / "tuning.csv", index=False)
-    (paths.intermediate / "selected.json").write_text(json.dumps(selected, indent=2))
-
-    runs = final_runs(specs, selected, test_window, user_ids, catalogue, setup)
+    runs = final_runs(specs, selected, test_window, user_ids, catalogue, setup,
+                      weights_dir=weights, restore=saved_dir is not None)
     table = overall(specs, selected, runs, setup)
     table.to_csv(paths.intermediate / "overall.csv", index=False)
     pairwise_tests(specs, runs, setup).to_csv(paths.intermediate / "pairwise.csv", index=False)
@@ -125,7 +143,11 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
     (paths.intermediate / "subgroups.json").write_text(json.dumps(thresholds, indent=2))
 
     abl = None
-    if ablation:
+    if ablation and saved_dir is not None:
+        copy_outputs(saved_dir / "intermediate", paths.intermediate,
+                     ["ablation.csv", "ablation-tau.csv", "ablation-info.csv"])
+        abl = pd.read_csv(paths.intermediate / "ablation.csv")
+    elif ablation:
         abl, taus, info = sparsity_ablation(specs, selected, runs, test_window, user_ids,
                                             catalogue, setup)
         abl.to_csv(paths.intermediate / "ablation.csv", index=False)
@@ -134,6 +156,8 @@ def run_part2(data_dir, out_dir, *, models=None, budget=BUDGET, seeds=(0, 1, 2, 
 
     export_results(table, trials, budget, paths.root / "results-part2.csv")
     plot_all(specs, runs, disagg, abl, paths.images)
+    if saved_dir is None:
+        (weights / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     minutes = (time.perf_counter() - started) / 60
     cols = ["model"] + [f"{m}@10" for m in METRICS] + ["coverage"]
     with pd.option_context("display.width", 200, "display.precision", 4):

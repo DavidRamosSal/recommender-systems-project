@@ -161,6 +161,15 @@ class BPR:
     def score(self, user_id: int, item_ids: NDArray[np.int64]) -> NDArray[np.float64]:
         return self.score_users([user_id], item_ids)[0]
 
+    def weights(self):
+        return {"users": self._users.to_numpy(), "items": self._items.to_numpy(),
+                "P": self.P, "Q": self.Q, "bias": self.b, "loss_history": self.loss_history}
+
+    def load_weights(self, weights):
+        self._users, self._items = pd.Index(weights["users"]), pd.Index(weights["items"])
+        self.P, self.Q, self.b = weights["P"], weights["Q"], weights["bias"]
+        self.loss_history = weights["loss_history"].tolist()
+
 
 def sample_negatives(u, rated, n_items, rng, max_rounds: int = 100):
     """Uniform j per user u with (u, j) not rated, by rejection sampling.
