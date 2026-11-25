@@ -1,7 +1,8 @@
-"""Evaluate saved models and regenerate report tables and figures (Parts 1 and 2).
+"""Evaluate saved models and regenerate report tables and figures (Parts 1-3).
 
     uv run --locked scripts/run_all.py --data-dir data/ml-1m
     uv run --locked scripts/run_all.py --data-dir data/ml-1m --parts 2   # Part 2 only
+    uv run --locked scripts/run_all.py --data-dir data/ml-1m --parts 3   # Part 3 only
     uv run --locked scripts/run_all.py --retrain   # repeat model selection and training
 
 Downloads MovieLens 1M if the default dataset is missing. For an existing copy,
@@ -26,6 +27,7 @@ from download_data import download_data
 from run_baselines import run_baselines
 from run_markov import run_comparison
 from run_part2 import run_part2
+from run_part3 import run_part3
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,8 +56,8 @@ def main():
                         help="Existing MovieLens directory (default: data/ml-1m; downloaded if missing).")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "results",
                         help="Directory for generated tables and figures (default: results).")
-    parser.add_argument("--parts", nargs="+", type=int, choices=(1, 2), default=[1, 2],
-                        help="Which parts to reproduce (default: 1 2).")
+    parser.add_argument("--parts", nargs="+", type=int, choices=(1, 2, 3), default=[1, 2, 3],
+                        help="Which parts to reproduce (default: 1 2 3).")
     parser.add_argument("--retrain", action="store_true",
                         help="Rerun validation, refit models, and replace the generated weights and results.")
     args = parser.parse_args()
@@ -77,6 +79,8 @@ def main():
             run_comparison(dataset.ratings, out_dir=paths.root, item_knn_grid=grid)
         else:
             copy_outputs(saved, paths.root, MARKOV_TABLES)
+    if 3 in args.parts:
+        run_part3(data_dir, paths.root, dataset=dataset, retrain=args.retrain)
 
 
 def run_part1(dataset, data_dir, paths, saved_dir=None):

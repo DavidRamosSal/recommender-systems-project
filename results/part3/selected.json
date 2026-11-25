@@ -1,0 +1,17 @@
+{
+  "lambda": 0.55,
+  "rule": "smallest lambda with validation NDCG@10 >= (1 - 0.05) x NDCG@10 at lambda = 1",
+  "max_relative_ndcg_loss": 0.05,
+  "candidates": 100,
+  "validation_ndcg_base": 0.1741030210889965,
+  "validation_ndcg_selected": 0.16547360445239,
+  "base_model": "bpr",
+  "base_params": {
+    "feedback": "positives",
+    "factors": 128,
+    "lr": 0.025,
+    "reg": 0.005,
+    "epochs": 40
+  },
+  "item_distance": "1 - cosine similarity of 18-dimensional multi-hot genre vectors"
+}
