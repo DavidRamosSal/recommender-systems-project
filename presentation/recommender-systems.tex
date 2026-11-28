@@ -114,7 +114,7 @@
         }
         \node[axis] at (0,0.99) {Movies};
         \node[axis,rotate=90] at (-1.37,0) {Users};
-        \node[caption] at (0,-0.85) {Ratings};
+        \node[caption] at (0,-0.85) {Observed ratings};
 
         \draw[->,Muted] (0.91,0) -- (1.65,0) node[midway,above,axis] {fit};
         \matrix (P) [factors,row 2/.style={nodes=picked}] at (2.58,0) {
@@ -124,8 +124,8 @@
         };
         \node at (3.77,0) {$\times$};
         \matrix (Q) [factors,column 1/.style={nodes=picked}] at (4.96,0) {
-          1 \& 0 \& 1 \\
-          1 \& 1 \& 0 \\
+          2 \& 0 \& 0 \\
+          1 \& 3 \& 0 \\
           0 \& 1 \& 2 \\
         };
         \node[caption] at (2.58,-0.85) {User factors $P$};
@@ -134,9 +134,10 @@
     \end{column}
     \begin{column}{0.42\textwidth}
       \textbf{Movie score}\quad $s_{ui}=\mathbf p_u^\top\mathbf q_i+b_i$\par\smallskip
-      For $u_2$, BPR maximizes the probability that the 5-star movie $i_1$
-      outranks the unrated $i_2$.\par\smallskip
-      $\Pr(i_1\succ i_2\mid u_2)=\sigma(s_{21}-s_{22})$
+      For $u_2$, with $b_i=0$ in this example,\par
+      $s_{21}=2\cdot2+1\cdot1+0\cdot0=5$ and $s_{22}=3$.\par\smallskip
+      BPR rewards ranking the 5-star $i_1$ above the unrated $i_2$.\par
+      $\Pr(i_1\succ i_2\mid u_2)=\sigma(5-3)$
     \end{column}
   \end{columns}
 
