@@ -94,6 +94,11 @@
 \begin{frame}{Baseline recommender: Bayesian Personalized Ranking (BPR)}
   % Lecture 2.1, slide 4. Three users, three movies and three illustrative factors.
   \begin{columns}[onlytextwidth,c]
+    \begin{column}{0.42\textwidth}
+      Our baseline starts with \textbf{matrix factorization}. Each user and each
+      movie has a vector. BPR learns these vectors so movies a user liked score
+      higher than movies they haven't rated.
+    \end{column}
     \begin{column}{0.56\textwidth}
       \centering
       \begin{tikzpicture}[
@@ -131,13 +136,6 @@
         \node[caption] at (2.58,-0.85) {User factors $P$};
         \node[caption] at (4.96,-0.85) {Movie factors $Q^\top$};
       \end{tikzpicture}
-    \end{column}
-    \begin{column}{0.42\textwidth}
-      \textbf{Movie score}\quad $s_{ui}=\mathbf p_u^\top\mathbf q_i+b_i$\par\smallskip
-      For $u_2$, with $b_i=0$ in this example,\par
-      $s_{21}=2\cdot2+1\cdot1+0\cdot0=5$ and $s_{22}=3$.\par\smallskip
-      BPR rewards ranking the 5-star $i_1$ above the unrated $i_2$.\par
-      $\Pr(i_1\succ i_2\mid u_2)=\sigma(5-3)$
     \end{column}
   \end{columns}
 
